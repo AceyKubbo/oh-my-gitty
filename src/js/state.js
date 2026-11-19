@@ -14,7 +14,7 @@ const prefersLight = typeof window !== "undefined" && window.matchMedia?.("(pref
 export const DEFAULT_THEME = prefersLight ? "light" : "dark";
 
 /* ===== 共享可变状态(setter 供跨模块重绑) ===== */
-export let settings = { ai: { ...DEFAULT_AI }, last_repo: null, repos: [], run_commands: {}, run_urls: {}, run_history: [], run_hidden: {}, run_last: {}, diff_width: null, run_height: null, sidebar_dirty_only: false, sidebar_width: null, sidebar_collapsed: false, theme: DEFAULT_THEME };
+export let settings = { ai: { ...DEFAULT_AI }, last_repo: null, repos: [], run_commands: {}, run_urls: {}, run_history: [], run_hidden: {}, run_last: {}, diff_width: null, run_height: null, sidebar_dirty_only: false, sidebar_width: null, sidebar_collapsed: false, editor_dark: true, theme: DEFAULT_THEME };
 export let repos = []; // 侧栏仓库摘要列表
 export let repo = null; // 当前仓库路径
 export let view = "repo"; // 主区视图:repo(单项目面板) | overview(多仓库总览)

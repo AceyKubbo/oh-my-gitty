@@ -1,6 +1,6 @@
 /* 仓库面板视图:刷新主区(状态+历史)、空态、文件列表(暂存/更改/冲突)、diff 视图、
    忽略规则对话框、「更多」菜单 */
-import { $, invoke, toast, setButtonLoading, STATUS_CHARS, repo, view, repos, lastShipStatus, setLastShipStatus, setNumBadge } from "./state.js";
+import { $, invoke, toast, setButtonLoading, STATUS_CHARS, repo, view, repos, settings, lastShipStatus, setLastShipStatus, setNumBadge } from "./state.js";
 import { updateProjectHeader, renderRepoList, removeRepo } from "./sidebar.js";
 import { renderHistory } from "./history.js";
 import { toggleStage, stagePaths, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache } from "./git-ops.js";
@@ -471,6 +471,20 @@ let editorLoadSeq = 0;      // 异步加载序号:丢弃过期结果
 
 const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const SUN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+const MOON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>';
+
+// 编辑器专属暗黑模式:缺省开启,仅作用于右侧代码区,不影响应用整体主题
+function syncEditorTheme() {
+  const dark = settings.editor_dark !== false;
+  $("diff-panel").classList.toggle("code-dark", dark);
+  const btn = $("btn-editor-theme");
+  if (btn) {
+    btn.innerHTML = dark ? SUN_SVG : MOON_SVG;
+    btn.title = dark ? "切换到浅色代码区" : "切换到暗黑代码区";
+  }
+}
+
 // 打开文件:设置标题与可用标签,展示面板并加载当前标签内容
 function openEditor(e, kind) {
   diffRepo = repo;
@@ -607,6 +621,14 @@ function normalizeGitignore(text) {
 /* ===== 事件绑定 ===== */
 export function bindPanelEvents() {
   $("btn-diff-close").addEventListener("click", closeDiffPanel);
+
+  // 代码区暗黑模式:初始按记忆值应用,点击切换并持久化
+  syncEditorTheme();
+  $("btn-editor-theme").addEventListener("click", () => {
+    settings.editor_dark = !(settings.editor_dark !== false);
+    syncEditorTheme();
+    invoke("settings_save", { settings }).catch(() => {});
+  });
 
   // 工具栏开关:显示/隐藏右侧代码对比面板
   $("btn-toggle-editor").addEventListener("click", () => {
