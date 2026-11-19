@@ -381,7 +381,7 @@ mod tests {
     fn normalizes_platform_paths_for_repo_identity() {
         let normalized = normalize(r"C:\Work\Hello-Gitty\");
         if cfg!(windows) {
-            assert_eq!(normalized, "c:/work/oh-my-gitty");
+            assert_eq!(normalized, "c:/work/hello-gitty");
         } else {
             assert_eq!(normalized, "C:/Work/Hello-Gitty");
         }
