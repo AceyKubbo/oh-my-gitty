@@ -19,10 +19,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes=".github/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
-          if [ -f "$notes" ]; then
-            gh release create "$GITHUB_REF_NAME" --draft --notes-file "$notes" --title "Oh My Gitty $GITHUB_REF_NAME"
+          args=(--draft --title "Oh My Gitty $GITHUB_REF_NAME")
+          if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
+          # 重跑时 Release 可能已存在,复用它避免 gh release create 失败
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists, reusing it."
           else
-            gh release create "$GITHUB_REF_NAME" --draft --generate-notes --title "Oh My Gitty $GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" "${args[@]}"
           fi
 
   build-macos:
@@ -79,7 +82,7 @@ jobs:
 
   build-macos-arm:
     needs: create-release
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
