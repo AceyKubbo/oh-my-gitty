@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hello Gitty</title>
+  <title>Oh My Gitty</title>
   <link rel="icon" type="image/png" href="favicon.png" />
   <link rel="stylesheet" href="styles.css?v=20261119000000" />
   <script>
@@ -77,6 +77,10 @@
         <!-- 筛选按钮:实心漏斗,单独靠右(margin-left:auto 推到行尾,见 styles.css) -->
         <button id="btn-dirty-only" class="icon-btn" data-tip="只显示待提交项目">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+        </button>
+        <!-- 全局深浅模式快捷切换:侧栏底栏最右侧,图标与代码查看器一致 -->
+        <button class="icon-btn" id="btn-theme-toggle" title="切换深色/浅色模式">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
         </button>
       </div>
       <div id="sidebar-resizer" title="拖动调整侧栏宽度"></div>
@@ -169,7 +173,7 @@
           <div class="dash-head">
             <span class="dash-title">
               <img class="dash-title-icon" src="favicon.png" alt="" width="24" height="24" draggable="false" />
-              Hello Gitty
+              Oh My Gitty
             </span>
             <div class="dash-head-actions">
               <button id="btn-add-projects" class="tool-btn">

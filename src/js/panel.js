@@ -237,6 +237,7 @@ const CARET_SVG = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" s
 const FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" stroke="none"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2Z"/></svg>';
 const STAGE_FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
 const UNSTAGE_FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>';
+const IGNORE_FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>';
 
 // 递归收集目录(含子目录)下所有文件路径,供目录节点的批量按钮使用
 function collectFilePaths(dir) {
@@ -289,6 +290,18 @@ function folderNode(dir, kind) {
       stagePaths(collectFilePaths(dir), stage);
     });
     head.appendChild(btn);
+
+    // 批量忽略:一条目录规则覆盖该目录下所有文件(含子目录)
+    const ib = document.createElement("button");
+    ib.className = "folder-batch folder-ignore";
+    ib.innerHTML = IGNORE_FOLDER_SVG;
+    ib.title = "忽略此目录（含子目录）";
+    ib.setAttribute("aria-label", ib.title);
+    ib.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      askIgnoreDir(dir.path);
+    });
+    head.appendChild(ib);
   }
   li.appendChild(head);
 
@@ -430,17 +443,10 @@ function stChar(e, kind) {
   return STATUS_CHARS[e.y] || "M";
 }
 
-// 添加到 .gitignore:计算文件名/扩展名/目录候选规则
-function askIgnore(path) {
-  const base = path.split("/").pop();
-  const dot = base.lastIndexOf(".");
-  const ext = dot > 0 ? "*" + base.slice(dot) : null;
-  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : null;
+// 忽略对话框:渲染候选规则(默认勾选第一条),确认逻辑统一在 btn-ignore-confirm
+function showIgnoreDialog(opts) {
   const box = $("ignore-options");
   box.innerHTML = "";
-  const opts = [{ label: "此文件", rule: base }];
-  if (ext) opts.push({ label: "此扩展名", rule: ext });
-  if (dir) opts.push({ label: "此目录", rule: dir });
   opts.forEach((o, i) => {
     const lab = document.createElement("label");
     lab.className = "ignore-opt";
@@ -458,6 +464,24 @@ function askIgnore(path) {
     box.appendChild(lab);
   });
   $("dlg-ignore").classList.remove("hidden");
+}
+
+// 单文件忽略:文件名 / 扩展名 / 所在目录 三个候选规则
+function askIgnore(path) {
+  const base = path.split("/").pop();
+  const dot = base.lastIndexOf(".");
+  const ext = dot > 0 ? "*" + base.slice(dot) : null;
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : null;
+  const opts = [{ label: "此文件", rule: base }];
+  if (ext) opts.push({ label: "此扩展名", rule: ext });
+  if (dir) opts.push({ label: "此目录", rule: dir });
+  showIgnoreDialog(opts);
+}
+
+// 目录批量忽略:一条规则覆盖该目录及所有子目录,复用同一个确认对话框
+function askIgnoreDir(dirPath) {
+  const rule = String(dirPath).replace(/\/+$/, "") + "/";
+  showIgnoreDialog([{ label: "此目录（含子目录）", rule }]);
 }
 
 /* ===== 右侧代码/对比编辑器 =====

@@ -884,7 +884,7 @@ mod tests {
 
     fn temp_repo(name: &str) -> std::path::PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("hellogitty-test-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ohmygitty-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         run_git(dir.to_str().unwrap(), &["init", "-q"]).unwrap();
@@ -1096,7 +1096,7 @@ mod tests {
     fn upstream_and_remote_log() {
         // 建裸仓库作远程
         let bare =
-            std::env::temp_dir().join(format!("hellogitty-test-bare-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ohmygitty-test-bare-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&bare);
         std::fs::create_dir_all(&bare).unwrap();
         run_git(bare.to_str().unwrap(), &["init", "-q", "--bare"]).unwrap();

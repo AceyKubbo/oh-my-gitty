@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn replace_file_creates_and_overwrites_destination() {
-        let dir = std::env::temp_dir().join(format!("hello-gitty-config-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oh-my-gitty-config-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let from = dir.join("settings.json.tmp");

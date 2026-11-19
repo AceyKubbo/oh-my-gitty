@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    hello_gitty_lib::run()
+    oh_my_gitty_lib::run()
 }

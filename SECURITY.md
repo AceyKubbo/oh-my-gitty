@@ -4,7 +4,7 @@
 
 如果你发现安全漏洞，请**不要**在公开 Issue 中提交详情。
 
-请通过 [GitHub 私密漏洞报告](https://github.com/Bavoch/hello-gitty/security/advisories/new)提交，或邮件联系 `hello@lumifold.top`。
+请通过 [GitHub 私密漏洞报告](https://github.com/AceyKubbo/oh-my-gitty/security/advisories/new)提交，或邮件联系 `hello@lumifold.top`。
 
 报告时请尽量包含：
 
@@ -28,7 +28,7 @@
 
 ## 安全边界说明
 
-Hello Gitty 通过调用系统 `git` CLI 工作，仓库内容默认只留在本机。AI 请求走你在设置中配置的 OpenAI 兼容接口，API Key 仅保存在本机配置文件中，只会在调用该接口时作为鉴权凭证发送给它。请确认所用接口的隐私政策，使用非官方接口地址时注意自行评估数据安全。
+Oh My Gitty 通过调用系统 `git` CLI 工作，仓库内容默认只留在本机。AI 请求走你在设置中配置的 OpenAI 兼容接口，API Key 仅保存在本机配置文件中，只会在调用该接口时作为鉴权凭证发送给它。请确认所用接口的隐私政策，使用非官方接口地址时注意自行评估数据安全。
 
 ---
 
@@ -38,7 +38,7 @@ Hello Gitty 通过调用系统 `git` CLI 工作，仓库内容默认只留在本
 
 If you discover a security vulnerability, please **do not** post the details in a public issue.
 
-Report it via [GitHub private vulnerability reporting](https://github.com/Bavoch/hello-gitty/security/advisories/new), or email `hello@lumifold.top`.
+Report it via [GitHub private vulnerability reporting](https://github.com/AceyKubbo/oh-my-gitty/security/advisories/new), or email `hello@lumifold.top`.
 
 When reporting, please include where possible:
 
@@ -62,4 +62,4 @@ When reporting, please include where possible:
 
 ## Security Notes
 
-Hello Gitty works through your system `git` CLI; repository content stays on your machine by default. AI requests go to the OpenAI-compatible endpoint you configure in Settings. The API key is stored only in the local config file and is sent only to that endpoint as an authentication credential. Review your provider's privacy policy, especially when using unofficial API endpoints.
+Oh My Gitty works through your system `git` CLI; repository content stays on your machine by default. AI requests go to the OpenAI-compatible endpoint you configure in Settings. The API key is stored only in the local config file and is sent only to that endpoint as an authentication credential. Review your provider's privacy policy, especially when using unofficial API endpoints.

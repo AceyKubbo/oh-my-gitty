@@ -1,4 +1,4 @@
-# Hello Gitty UI 设计系统
+# Oh My Gitty UI 设计系统
 
 简体中文 | [English](ui-design-system.en.md)
 

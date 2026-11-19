@@ -381,7 +381,7 @@ mod tests {
     fn normalizes_platform_paths_for_repo_identity() {
         let normalized = normalize(r"C:\Work\Hello-Gitty\");
         if cfg!(windows) {
-            assert_eq!(normalized, "c:/work/hello-gitty");
+            assert_eq!(normalized, "c:/work/oh-my-gitty");
         } else {
             assert_eq!(normalized, "C:/Work/Hello-Gitty");
         }
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn scans_nested_repos_and_skips_deps() {
-        let dir = std::env::temp_dir().join(format!("hellogitty-scan-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ohmygitty-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         // 结构:root(非仓库)/ proj-a(repo) / proj-b(普通) / node_modules/pkg(repo,应跳过)
         //        / work/proj-c(repo,嵌套两层,应发现)
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn finds_common_icon() {
-        let dir = std::env::temp_dir().join(format!("hellogitty-icon-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ohmygitty-icon-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // 空目录 → 无真实图标(None,前端渲染字母头像)
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn finds_chrome_extension_icon() {
-        let dir = std::env::temp_dir().join(format!("hellogitty-chrome-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ohmygitty-chrome-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // 按 manifest.json 声明 icons(128 优先)
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn categorizes_projects() {
-        let base = std::env::temp_dir().join(format!("hellogitty-cat-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("ohmygitty-cat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let mk = |name: &str| {
             let d = base.join(name);
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn finds_icon_by_pattern_and_case() {
-        let dir = std::env::temp_dir().join(format!("hellogitty-icon2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ohmygitty-icon2-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let png = vec![0x89, 0x50, 0x4e, 0x47];
         // public/favicon.svg(Vite 项目常见)→ 精确命中
@@ -1887,7 +1887,7 @@ pub fn run() {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-            let show = MenuItem::with_id(app, "show", "显示 Hello Gitty", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "显示 Oh My Gitty", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let tray_icon = if cfg!(target_os = "macos") {
@@ -1897,7 +1897,7 @@ pub fn run() {
                 app.default_window_icon().expect("缺少应用图标").clone()
             };
 
-            let _tray = TrayIconBuilder::with_id("hello-gitty-tray")
+            let _tray = TrayIconBuilder::with_id("oh-my-gitty-tray")
                 .icon(tray_icon)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -1930,7 +1930,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("Hello Gitty 启动失败");
+        .expect("Oh My Gitty 启动失败");
     // 应用真正退出时(含托盘退出与系统退出操作):统一关闭所有运行中的服务器,避免孤儿进程
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {

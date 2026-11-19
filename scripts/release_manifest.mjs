@@ -47,7 +47,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-let notes = `Hello Gitty ${tag}`;
+let notes = `Oh My Gitty ${tag}`;
 if (notesFile) {
   try {
     const body = readFileSync(notesFile, "utf8").trim();

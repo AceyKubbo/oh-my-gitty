@@ -1,15 +1,15 @@
 [package]
-name = "hello-gitty"
-version = "0.2.1"
+name = "oh-my-gitty"
+version = "0.3.0"
 description = "轻量桌面 Git 管理工具,为单人 AI 开发者定制"
 edition = "2021"
 authors = ["Bavoch"]
 license = "MIT"
-homepage = "https://github.com/Bavoch/hello-gitty"
-repository = "https://github.com/Bavoch/hello-gitty.git"
+homepage = "https://github.com/AceyKubbo/oh-my-gitty"
+repository = "https://github.com/AceyKubbo/oh-my-gitty.git"
 
 [lib]
-name = "hello_gitty_lib"
+name = "oh_my_gitty_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

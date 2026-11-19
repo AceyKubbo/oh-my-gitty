@@ -1,6 +1,6 @@
 :root,
 [data-theme=dark] {
-  /* Hello Gitty / terminal dashboard tokens. Keep these values as the visual source of truth. */
+  /* Oh My Gitty / terminal dashboard tokens. Keep these values as the visual source of truth. */
   --bg: #1b1b1b;
   --panel: #222222;
   --panel-2: #292929;
@@ -236,8 +236,11 @@ select option { background: var(--input-bg); color: var(--text); }
 /* 侧栏「只看待提交」过滤开启:主题色标识(不用 .active,那是图钉的旋转定制) */
 #btn-dirty-only.on { color: var(--accent); }
 #btn-dirty-only.on:hover { color: var(--accent); background: var(--accent-soft); }
-/* 筛选按钮单独靠右:与左侧「置顶/设置」分组隔开 */
+/* 筛选按钮单独靠右:与左侧「置顶/设置」分组隔开(主题切换紧随其后,占据底栏最右) */
 #btn-dirty-only { margin-left: auto; }
+/* 侧栏底栏右下角的全局主题切换:与代码查看器同款图标按钮 */
+#btn-theme-toggle { color: var(--text-dim); }
+#btn-theme-toggle:hover { color: var(--accent-bright); background: var(--hover); }
 /* 收起态 footer 纵向堆叠,取消右推保持居中 */
 #sidebar.collapsed #btn-dirty-only { margin-left: 0; }
 .icon-btn.active svg { transform: rotate(45deg); }
@@ -640,6 +643,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .file-tree .tree-folder-head:hover .folder-batch,
 .file-tree .folder-batch:hover { opacity: 1; color: var(--accent-bright); }
 .file-tree .folder-batch:hover { background: var(--hover-strong); border-color: var(--border); }
+.file-tree .folder-ignore:hover { color: var(--orange); }
 /* 文件行按层级缩进:根目录文件 depth=0,与旧版 32px 起点对齐 */
 .file-tree .tree-file { padding-left: calc(28px + var(--depth, 0) * 16px); }
 

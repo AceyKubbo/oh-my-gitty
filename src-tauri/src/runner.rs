@@ -934,21 +934,21 @@ mod tests {
 
     #[test]
     fn windows_process_context_path_requires_boundaries() {
-        let root = r"c:\work\hello-gitty";
+        let root = r"c:\work\oh-my-gitty";
         assert!(context_contains_path(
-            r#"node.exe\t\"c:\work\hello-gitty\node_modules\vite\bin\vite.js\""#,
+            r#"node.exe\t\"c:\work\oh-my-gitty\node_modules\vite\bin\vite.js\""#,
             root
         ));
         assert!(context_contains_path(
-            r#"cmd.exe\tcmd /c cd c:\work\hello-gitty && npm run dev"#,
+            r#"cmd.exe\tcmd /c cd c:\work\oh-my-gitty && npm run dev"#,
             root
         ));
         assert!(!context_contains_path(
-            r#"node.exe\t\"c:\work\hello-gitty-old\server.js\""#,
+            r#"node.exe\t\"c:\work\oh-my-gitty-old\server.js\""#,
             root
         ));
         assert!(!context_contains_path(
-            r#"node.exe\t\"d:\copy-c:\work\hello-gitty\server.js\""#,
+            r#"node.exe\t\"d:\copy-c:\work\oh-my-gitty\server.js\""#,
             root
         ));
     }

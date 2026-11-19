@@ -2,7 +2,7 @@
 
 [简体中文](CONTRIBUTING.md) | English
 
-Thanks for contributing to Hello Gitty! Please take a few minutes to read this guide.
+Thanks for contributing to Oh My Gitty! Please take a few minutes to read this guide.
 
 ## Development Environment
 
@@ -42,10 +42,10 @@ Push a `v*` tag to trigger the Release workflow, which builds the macOS/Windows 
 - `TAURI_SIGNING_PRIVATE_KEY`: full contents of `.tauri/updater.key` (the key never enters the repo; back it up — **if lost, already-released versions can no longer receive updates**)
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the key passphrase (this repo's key has none; set it to an empty string)
 
-The private key is also backed up in this machine's macOS Keychain (service `hello-gitty`, account `updater-signing-key`); if the `.tauri/` directory is ever lost, recover it with:
+The private key is also backed up in this machine's macOS Keychain (service `oh-my-gitty`, account `updater-signing-key`); if the `.tauri/` directory is ever lost, recover it with:
 
 ```bash
-security find-generic-password -s hello-gitty -a updater-signing-key -w > .tauri/updater.key
+security find-generic-password -s oh-my-gitty -a updater-signing-key -w > .tauri/updater.key
 ```
 
 ## License

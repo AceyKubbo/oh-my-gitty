@@ -1,4 +1,4 @@
-/* Hello Gitty 前端入口:应用初始化、设置对话框、全局弹层收起。
+/* Oh My Gitty 前端入口:应用初始化、设置对话框、全局弹层收起。
    各功能域拆分在 js/ 下(ES modules,无打包器):state(共享状态/工具)、
    sidebar(侧栏/项目管理)、panel(仓库面板)、git-ops(Git 操作/AI)、
    history(历史)、run-panel(运行服务器)、dashboard(多仓库总览)。 */
@@ -85,6 +85,26 @@ let cliScanCache = null;
 let cliSel = null;
 let themeBeforeSettings = DEFAULT_THEME;
 
+// 右下角全局主题切换:图标与代码查看器一致(暗黑时显示太阳=点击转浅色)
+const THEME_SUN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+const THEME_MOON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>';
+
+function syncThemeToggle() {
+  const btn = $("btn-theme-toggle");
+  if (!btn) return;
+  const dark = document.documentElement.dataset.theme !== "light";
+  btn.innerHTML = dark ? THEME_SUN_SVG : THEME_MOON_SVG;
+  btn.title = dark ? "切换到浅色模式" : "切换到深色模式";
+}
+
+function toggleTheme() {
+  const next = applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  settings.theme = next;
+  $("set-theme").value = next; // 设置里的主题项跟随,避免两处状态不一致
+  syncThemeToggle();
+  invoke("settings_save", { settings }).catch(() => {});
+}
+
 function openSettings() {
   themeBeforeSettings = settings.theme || DEFAULT_THEME;
   $("set-theme").value = themeBeforeSettings;
@@ -146,6 +166,7 @@ function collectAiConfig() {
 async function saveSettings() {
   // 主题已在选择时预览;保存时只需写入配置
   const theme = applyTheme($("set-theme").value);
+  syncThemeToggle();
   const collected = collectAiConfig();
   if (collected.error) {
     toast(collected.error, false);
@@ -261,11 +282,14 @@ function fillCliModels(t) {
   }
 }
 function bindDialogEvents() {
+  // 右下角主题快捷切换
+  $("btn-theme-toggle").addEventListener("click", toggleTheme);
+  syncThemeToggle();
   $("btn-settings").addEventListener("click", openSettings);
   $("btn-settings-cancel").addEventListener("click", () => closeSettings(true));
   $("btn-settings-save").addEventListener("click", saveSettings);
   $("btn-settings-close").addEventListener("click", () => closeSettings(true));
-  $("set-theme").addEventListener("change", (e) => applyTheme(e.target.value));
+  $("set-theme").addEventListener("change", (e) => { applyTheme(e.target.value); syncThemeToggle(); });
   // AI 调用方式切换;切到 CLI 时按需触发扫描
   $("set-ai-mode").addEventListener("change", () => {
     syncAiModeFields();

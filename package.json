@@ -1,12 +1,12 @@
 {
-  "name": "hello-gitty",
-  "version": "0.2.1",
+  "name": "oh-my-gitty",
+  "version": "0.3.0",
   "description": "轻量桌面 Git 管理工具，为单人 AI 开发者定制",
   "license": "MIT",
   "author": "Bavoch",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Bavoch/hello-gitty.git"
+    "url": "https://github.com/AceyKubbo/oh-my-gitty.git"
   },
   "keywords": [
     "git",

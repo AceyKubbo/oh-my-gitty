@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Bavoch/hello-gitty/main/src/favicon.png" alt="Hello Gitty" width="120" />
+  <img src="https://raw.githubusercontent.com/AceyKubbo/oh-my-gitty/main/src/favicon.png" alt="Oh My Gitty" width="120" />
 </p>
 
-# Hello Gitty 🐱
+# Oh My Gitty 🐱
 
-[![Windows CI](https://github.com/Bavoch/hello-gitty/actions/workflows/windows.yml/badge.svg)](https://github.com/Bavoch/hello-gitty/actions/workflows/windows.yml)
-[![Release](https://img.shields.io/github/v/release/Bavoch/hello-gitty)](https://github.com/Bavoch/hello-gitty/releases)
+[![Windows CI](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml/badge.svg)](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml)
+[![Release](https://img.shields.io/github/v/release/AceyKubbo/oh-my-gitty)](https://github.com/AceyKubbo/oh-my-gitty/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 简体中文 | [English](README.en.md)
 
-Hello Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
+Oh My Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
 
 在使用 AI 进行开发时，我通常很少直接阅读代码，因此 IDE 中的大部分功能对我来说并不必要。很多时候，我只是想管理 Git、控制版本或撤销操作，却不得不打开庞大的 VsCode，只为使用左侧那一小块 Git 面板。与此同时，开发多个项目还意味着要打开多个 VsCode 窗口，不仅占用内存，也不够简洁优雅。
 
-因此，我做了 Hello Gitty：一款专注于 Git 管理、轻量且独立的开发辅助工具。
+因此，我做了 Oh My Gitty：一款专注于 Git 管理、轻量且独立的开发辅助工具。
 
 ## 核心亮点
 
@@ -47,13 +47,13 @@ Hello Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
 
 ### 从 Release 下载
 
-前往 [Releases](https://github.com/Bavoch/hello-gitty/releases) 下载最新版安装包：
+前往 [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases) 下载最新版安装包：
 
 | 平台 | 文件 |
 | --- | --- |
-| macOS Apple Silicon | `Hello.Gitty_<版本>_aarch64.dmg` |
-| macOS Intel | `Hello.Gitty_<版本>_x64.dmg` |
-| Windows 10/11（x64） | `Hello.Gitty_<版本>_x64-setup.exe` |
+| macOS Apple Silicon | `Oh.My.Gitty_<版本>_aarch64.dmg` |
+| macOS Intel | `Oh.My.Gitty_<版本>_x64.dmg` |
+| Windows 10/11（x64） | `Oh.My.Gitty_<版本>_x64-setup.exe` |
 
 安装后应用会在启动时自动检查更新，也可以在「设置 → 关于与更新」中手动检查，直接在应用内完成下载与安装。
 
@@ -66,8 +66,8 @@ Hello Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
 需要 [Node.js](https://nodejs.org/) 18+ 和 [Rust](https://www.rust-lang.org/)。Windows 还需要按 [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) 安装 Microsoft C++ Build Tools 与 WebView2。
 
 ```bash
-git clone https://github.com/Bavoch/hello-gitty.git
-cd hello-gitty
+git clone https://github.com/AceyKubbo/oh-my-gitty.git
+cd oh-my-gitty
 npm ci
 npm run dev      # 开发模式（保存后窗口自动重载）
 npm run build    # macOS 输出 .dmg；Windows 输出 NSIS setup.exe
@@ -86,7 +86,7 @@ npm run build    # macOS 输出 .dmg；Windows 输出 NSIS setup.exe
 - Git 操作通过本机的 `git` CLI 完成，仓库内容默认只留在本机。
 - API 模式会把相关 diff、近期提交信息或冲突文件内容发送到设置中填写的 AI 接口；本地 CLI 模式会把同类内容交给所选工具处理，该工具是否上传数据取决于其提供方。请确认对应服务的隐私政策和数据处理方式。
 - AI API Key 仅保存在本机配置中；GitHub Token 用于创建远程仓库和推送，请勿提交到仓库或公开分享。
-- 发现安全漏洞请按 [安全策略](SECURITY.md) 私密报告；一般问题和功能建议可提交 [Issue](https://github.com/Bavoch/hello-gitty/issues)，也可以邮件联系 `hello@lumifold.top`。
+- 发现安全漏洞请按 [安全策略](SECURITY.md) 私密报告；一般问题和功能建议可提交 [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues)，也可以邮件联系 `hello@lumifold.top`。
 
 ## 技术栈
 
@@ -117,7 +117,7 @@ src-tauri/src/      后端
 > - 部分功能可能**未经充分的真实场景测试**
 > - 请**谨慎用于生产环境**，重要数据请做好备份
 >
-> 尽管如此，我们仍在持续迭代中。如果你在使用过程中发现问题，欢迎提交 [Issue](https://github.com/Bavoch/hello-gitty/issues)——每一条反馈都是这个项目变得更好的动力 🐱
+> 尽管如此，我们仍在持续迭代中。如果你在使用过程中发现问题，欢迎提交 [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues)——每一条反馈都是这个项目变得更好的动力 🐱
 
 ## 已知边界
 

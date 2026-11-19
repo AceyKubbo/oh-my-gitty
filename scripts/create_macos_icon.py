@@ -18,8 +18,8 @@ def build_icns(icon: Image.Image) -> None:
         return
 
     sizes = (16, 32, 128, 256, 512)
-    with tempfile.TemporaryDirectory(prefix="hello-gitty-iconset-") as temporary:
-        iconset = Path(temporary) / "HelloGitty.iconset"
+    with tempfile.TemporaryDirectory(prefix="oh-my-gitty-iconset-") as temporary:
+        iconset = Path(temporary) / "OhMyGitty.iconset"
         iconset.mkdir()
         for size in sizes:
             icon.resize((size, size), Image.Resampling.LANCZOS).save(

@@ -208,6 +208,8 @@ struct CliToolDef {
     name: &'static str,
     /// 可执行文件名(PATH 中检索用)
     bin: &'static str,
+    /// 备选可执行名(不同发行版命名不同,如 CodeBuddy 的 buddycn / codebuddy)
+    alt_bins: &'static [&'static str],
     /// stdin 提示词之前的固定参数(提示词一律经 stdin 传入,不受 argv 长度限制)
     args: &'static [&'static str],
     /// 模型参数;None = 不支持/位置参数特殊处理(如 ollama 的 run <model>)
@@ -229,6 +231,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "claude",
         name: "Claude Code",
         bin: "claude",
+        alt_bins: &[],
         args: &["-p"],
         model_flag: Some("--model"),
         // 别名集 = /model 选择器选项(取自 CLI 内置注册表);再附当前代完整模型 ID
@@ -244,6 +247,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "codex",
         name: "Codex CLI",
         bin: "codex",
+        alt_bins: &[],
         args: &["exec", "-"],
         model_flag: Some("-m"),
         // = CLI 内置模型目录(新) + 文档在列的历史版本,均可经 -m 调用
@@ -262,6 +266,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "gemini",
         name: "Gemini CLI",
         bin: "gemini",
+        alt_bins: &[],
         args: &[],
         model_flag: Some("-m"),
         // CLI 支持的全部文本模型代系(取自 CLI 内置模型表,不含图像/实时等专用变体)
@@ -280,6 +285,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "qwen",
         name: "Qwen Code",
         bin: "qwen",
+        alt_bins: &[],
         args: &[],
         model_flag: Some("-m"),
         // coder 系列为 OAuth 免费额度模型,其余代系为 Model Studio API 模型(取自 CLI 内置模型表)
@@ -296,6 +302,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "ollama",
         name: "Ollama",
         bin: "ollama",
+        alt_bins: &[],
         args: &["run"],
         model_flag: None,
         models: &[],
@@ -307,6 +314,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "crush",
         name: "Crush",
         bin: "crush",
+        alt_bins: &[],
         args: &["run"],
         model_flag: Some("--model"),
         models: &[],
@@ -318,6 +326,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         id: "opencode",
         name: "OpenCode",
         bin: "opencode",
+        alt_bins: &[],
         args: &["run"],
         model_flag: Some("-m"),
         models: &[],
@@ -336,6 +345,21 @@ const CLI_TOOLS: &[CliToolDef] = &[
             "AppData/Roaming/opencode/cli.json",
         ],
         hint: "模型格式为 provider/model，留空使用其默认模型",
+    },
+    CliToolDef {
+        id: "codebuddy",
+        name: "CodeBuddy",
+        // CodeBuddy CN 装的是 buddycn;国际版/其它安装方式可能叫 codebuddy
+        bin: "buddycn",
+        alt_bins: &["codebuddy"],
+        // chat 子命令从 stdin 读取提示词(末尾的 "-" 即 stdin 占位);
+        // -m ask 为只读问答模式,避免 agent 模式误改仓库文件
+        args: &["chat", "-m", "ask", "-"],
+        model_flag: None, // chat 无 --model;模型在 CodeBuddy 自身配置(models.json / 设置)中选
+        models: &[],      // 扫描时从 ~/.codebuddy/models.json 动态读取
+        list_args: None,
+        creds: &[".codebuddy", ".codebuddy/models.json"],
+        hint: "CodeBuddy CN 的聊天 CLI：会在 IDE 中打开聊天窗口，回复需在窗口中查看；模型在 CodeBuddy 设置里选择",
     },
 ];
 
@@ -386,6 +410,48 @@ pub async fn scan_cli_tools() -> Vec<CliToolInfo> {
     futures_util::future::join_all(probes).await
 }
 
+/// 依次尝试工具的所有可执行名(主名 + 别名),先查候选目录,再走 shell 兜底。
+/// 返回 (命中的可执行名, 绝对路径)。
+async fn find_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> Option<(String, String)> {
+    let mut bins: Vec<&str> = vec![def.bin];
+    bins.extend_from_slice(def.alt_bins);
+    for bin in bins {
+        if let Some(p) = find_in_dirs(bin, dirs) {
+            return Some((bin.to_string(), p));
+        }
+        if let Some(p) = shell_which(bin).await {
+            return Some((bin.to_string(), p));
+        }
+    }
+    None
+}
+
+/// 解析 CodeBuddy models.json 的模型 ID(纯函数,便于测试)
+fn parse_codebuddy_models(text: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    v.get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(|x| x.as_str()))
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 从 CodeBuddy 的模型配置(~/.codebuddy/models.json)读取模型 ID 作为 datalist 建议,
+/// 保证与用户在 CodeBuddy 里实际配置的模型一致。
+fn codebuddy_models() -> Option<Vec<String>> {
+    let home = user_home()?;
+    let text = std::fs::read_to_string(home.join(".codebuddy/models.json")).ok()?;
+    let ids = parse_codebuddy_models(&text);
+    (!ids.is_empty()).then_some(ids)
+}
+
 async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInfo {
     let mut info = CliToolInfo {
         id: def.id.into(),
@@ -398,11 +464,8 @@ async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInf
         models: def.models.iter().map(|s| s.to_string()).collect(),
         hint: def.hint.into(),
     };
-    let mut path = find_in_dirs(def.bin, dirs);
-    if path.is_none() {
-        path = shell_which(def.bin).await; // unix: shell profile ; windows: where.exe
-    }
-    let Some(p) = path else { return info };
+    let Some((bin_name, p)) = find_tool(def, dirs).await else { return info };
+    info.bin = bin_name; // 别名命中时展示实际找到的可执行名
     info.found = true;
     info.path = p.clone();
 
@@ -424,6 +487,12 @@ async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInf
         Some(models) => info.models = models,
         None if def.id == "ollama" => info.models.clear(), // 服务不可达:不给建议
         None => {}
+    }
+    // CodeBuddy 的 chat 子命令没有模型列表参数,改为读它自己的 models.json
+    if def.id == "codebuddy" {
+        if let Some(models) = codebuddy_models() {
+            info.models = models;
+        }
     }
     info.ready = if def.id == "ollama" {
         !info.models.is_empty()
@@ -461,6 +530,7 @@ fn home_install_rel_dirs(windows: bool) -> Vec<&'static str> {
         ".local/bin",
         ".cargo/bin",
         ".opencode/bin",   // opencode 官方安装脚本默认落点
+        ".codebuddy/bin",  // CodeBuddy CN 的 buddycn 启动器落点
         ".npm-global/bin", // npm 自定义全局 prefix
         ".npm/bin",
         ".local/share/npm/bin",
@@ -1042,7 +1112,35 @@ mod tests {
     fn tool_table_lookup() {
         assert!(tool_by_id("claude").is_some());
         assert!(tool_by_id("ollama").is_some());
+        assert!(tool_by_id("codebuddy").is_some(), "CodeBuddy 应在 CLI 工具表中");
         assert!(tool_by_id("nonexistent").is_none());
+    }
+
+    #[test]
+    fn codebuddy_uses_chat_subcommand_and_no_model_flag() {
+        let cb = tool_by_id("codebuddy").unwrap();
+        // chat 子命令只读问答 + stdin 占位,模型在 CodeBuddy 自身配置中选
+        assert_eq!(cli_args(cb, ""), vec!["chat", "-m", "ask", "-"]);
+        assert_eq!(cli_args(cb, "glm-5.3"), vec!["chat", "-m", "ask", "-"]);
+        assert!(cb.model_flag.is_none());
+        assert_eq!(cb.bin, "buddycn");
+        assert!(cb.alt_bins.contains(&"codebuddy"));
+    }
+
+    #[test]
+    fn parses_codebuddy_models_json() {
+        let sample = r#"{"models":[
+            {"id":"auto","name":"auto"},
+            {"id":"glm-5.3-flash","name":"GLM-5.3-Flash"},
+            {"id":"","name":"empty"}
+        ]}"#;
+        assert_eq!(
+            parse_codebuddy_models(sample),
+            vec!["auto", "glm-5.3-flash"]
+        );
+        // 非法 JSON / 缺 models 字段:回落空列表,不报错
+        assert!(parse_codebuddy_models("not json").is_empty());
+        assert!(parse_codebuddy_models(r#"{"other":1}"#).is_empty());
     }
 
     #[test]
@@ -1054,6 +1152,7 @@ mod tests {
             ".local/bin",
             ".cargo/bin",
             ".opencode/bin",
+            ".codebuddy/bin",
             ".npm-global/bin",
             ".bun/bin",
         ] {
@@ -1120,7 +1219,7 @@ mod tests {
     #[test]
     fn find_in_dirs_locates_executable() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("hello-gitty-cli-scan-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oh-my-gitty-cli-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("fake-ai-cli");
@@ -1149,7 +1248,7 @@ mod tests {
     /// 临时 git 仓库(与 git.rs 测试同款模式)
     fn temp_repo(name: &str) -> std::path::PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("hellogitty-ai-test-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ohmygitty-ai-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let r = dir.to_str().unwrap();

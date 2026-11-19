@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Bavoch/hello-gitty/main/src/favicon.png" alt="Hello Gitty" width="120" />
+  <img src="https://raw.githubusercontent.com/AceyKubbo/oh-my-gitty/main/src/favicon.png" alt="Oh My Gitty" width="120" />
 </p>
 
-# Hello Gitty 🐱
+# Oh My Gitty 🐱
 
-[![Windows CI](https://github.com/Bavoch/hello-gitty/actions/workflows/windows.yml/badge.svg)](https://github.com/Bavoch/hello-gitty/actions/workflows/windows.yml)
-[![Release](https://img.shields.io/github/v/release/Bavoch/hello-gitty)](https://github.com/Bavoch/hello-gitty/releases)
+[![Windows CI](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml/badge.svg)](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml)
+[![Release](https://img.shields.io/github/v/release/AceyKubbo/oh-my-gitty)](https://github.com/AceyKubbo/oh-my-gitty/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [简体中文](README.md) | English
 
-Hello Gitty is a Git management tool built for solo AI-driven developers.
+Oh My Gitty is a Git management tool built for solo AI-driven developers.
 
 When developing with AI, I rarely read code directly, so most IDE features are unnecessary for me. Most of the time I just want to manage Git, control versions, or undo changes — yet I have to open heavyweight VS Code just for that small Git panel in the sidebar. Juggling multiple projects also means multiple VS Code windows: memory-hungry and anything but elegant.
 
-So I built Hello Gitty: a lightweight, standalone companion focused on Git management.
+So I built Oh My Gitty: a lightweight, standalone companion focused on Git management.
 
 ## Highlights
 
@@ -47,13 +47,13 @@ So I built Hello Gitty: a lightweight, standalone companion focused on Git manag
 
 ### Download from Releases
 
-Go to [Releases](https://github.com/Bavoch/hello-gitty/releases) to download the latest installer:
+Go to [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases) to download the latest installer:
 
 | Platform | File |
 | --- | --- |
-| macOS Apple Silicon | `Hello.Gitty_<version>_aarch64.dmg` |
-| macOS Intel | `Hello.Gitty_<version>_x64.dmg` |
-| Windows 10/11 (x64) | `Hello.Gitty_<version>_x64-setup.exe` |
+| macOS Apple Silicon | `Oh.My.Gitty_<version>_aarch64.dmg` |
+| macOS Intel | `Oh.My.Gitty_<version>_x64.dmg` |
+| Windows 10/11 (x64) | `Oh.My.Gitty_<version>_x64-setup.exe` |
 
 Once installed, the app checks for updates on startup; you can also check manually under Settings → About & Update and download and install without leaving the app.
 
@@ -66,8 +66,8 @@ Once installed, the app checks for updates on startup; you can also check manual
 Requires [Node.js](https://nodejs.org/) 18+ and [Rust](https://www.rust-lang.org/). On Windows, also install Microsoft C++ Build Tools and WebView2 per the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
 
 ```bash
-git clone https://github.com/Bavoch/hello-gitty.git
-cd hello-gitty
+git clone https://github.com/AceyKubbo/oh-my-gitty.git
+cd oh-my-gitty
 npm ci
 npm run dev      # development mode (auto-reloads on save)
 npm run build    # macOS: .dmg; Windows: NSIS setup.exe
@@ -86,7 +86,7 @@ npm run build    # macOS: .dmg; Windows: NSIS setup.exe
 - Git operations run through your local `git` CLI; repository content stays on your machine by default.
 - API mode sends relevant diffs, recent commit messages, or conflicted file contents to the configured AI endpoint. Local CLI mode passes the same type of content to the selected tool; whether it uploads data depends on that provider. Review the applicable privacy policy and data practices.
 - The AI API key is stored only in the local config; the GitHub token is used to create remote repositories and push — never commit or share it publicly.
-- Report security vulnerabilities privately via the [security policy](SECURITY.md); general issues and feature suggestions can go to [Issues](https://github.com/Bavoch/hello-gitty/issues) or email `hello@lumifold.top`.
+- Report security vulnerabilities privately via the [security policy](SECURITY.md); general issues and feature suggestions can go to [Issues](https://github.com/AceyKubbo/oh-my-gitty/issues) or email `hello@lumifold.top`.
 
 ## Tech Stack
 
@@ -117,7 +117,7 @@ src-tauri/src/      Backend
 > - Some features may lack **thorough real-world testing**
 > - **Use with caution in production** and keep backups of important data
 >
-> That said, development continues. If you run into problems, please open an [Issue](https://github.com/Bavoch/hello-gitty/issues) — every piece of feedback makes this project better 🐱
+> That said, development continues. If you run into problems, please open an [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues) — every piece of feedback makes this project better 🐱
 
 ## Known Limitations
 
