@@ -79,6 +79,19 @@ export async function toggleStage(path, unstage) {
   await refresh();
 }
 
+// 文件树目录节点:批量暂存/取消暂存该目录下(含子目录)的所有文件,一次 git 调用完成
+export async function stagePaths(paths, stage) {
+  if (!paths.length) return;
+  try {
+    const r = await invoke("git_stage_paths", { repo, paths, stage });
+    if (r && r.ok === false) toast(r.output, false);
+    else toast(stage ? `已暂存 ${paths.length} 个文件` : `已取消暂存 ${paths.length} 个文件`, true);
+  } catch (e) {
+    toast(String(e), false);
+  }
+  await refresh();
+}
+
 /* ===== 提交(AI 流式) ===== */
 // 每个项目独立的面板状态:repo -> {state, msg, cancelled, busy}
 // 面板完全跟随项目:在 A 打开的面板不受 B 的任何操作影响,切走隐藏、切回恢复

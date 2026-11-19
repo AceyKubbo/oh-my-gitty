@@ -14,8 +14,9 @@ export async function showOverview() {
   $("toolbar").classList.add("hidden");
   $("empty-state").classList.add("hidden");
   $("panel").classList.add("hidden");
-  $("diff-panel").classList.add("hidden"); // 总览无 diff 面板,关闭并清空
-  $("diff-content").innerHTML = "";
+  $("sec-history").classList.add("hidden"); // 版本历史属于当前仓库,总览视图不展示
+  const { hideEditor } = await import("./panel.js"); // 总览无编辑器,关闭并清空
+  hideEditor();
   $("run-panel").classList.add("hidden"); // 总览无底部运行栏
   // 没有任何项目时:首页直接展示「新建项目」空态,不展示统计卡片
   // (保持 overview 视图与首页选中态,不走 showEmpty 的 leaveOverview 切回仓库视图)

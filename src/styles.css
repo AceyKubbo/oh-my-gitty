@@ -614,6 +614,35 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .row-actions button.armed { color: var(--red); background: var(--status-danger-faint); }
 .row-actions button.armed:hover { background: var(--status-danger-soft); color: var(--red); }
 
+/* ===== 文件树(暂存/更改/冲突):目录可点击展开/折叠,文件行沿用 .file-row 操作 ===== */
+.file-list.file-tree { padding-top: 2px; }
+.file-tree .tree-folder-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px 5px calc(10px + var(--depth, 0) * 16px);
+  cursor: pointer; font-size: 12.5px; color: var(--text);
+  user-select: none; -webkit-user-select: none;
+}
+.file-tree .tree-folder-head:hover { background: var(--hover); }
+.file-tree .tree-folder-head .caret { transition: transform .12s ease; }
+.file-tree .tree-folder-head.closed .caret { transform: rotate(-90deg); }
+.file-tree .folder-ic { display: inline-flex; color: var(--text-dim); }
+.file-tree .folder-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-tree .tree-children { padding: 0; }
+/* 目录标题最右侧的批量暂存/取消暂存按钮:默认低调,悬停目录行时高亮 */
+.file-tree .folder-batch {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; margin-left: 2px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--text-dim); opacity: .7;
+}
+.file-tree .tree-folder-head:hover .folder-batch,
+.file-tree .folder-batch:hover { opacity: 1; color: var(--accent-bright); }
+.file-tree .folder-batch:hover { background: var(--hover-strong); border-color: var(--border); }
+/* 文件行按层级缩进:根目录文件 depth=0,与旧版 32px 起点对齐 */
+.file-tree .tree-file { padding-left: calc(28px + var(--depth, 0) * 16px); }
+
 /* ===== 忙碌指示 ===== */
 .busy-ind {
   display: inline-flex; align-items: center; gap: 6px;
@@ -738,6 +767,26 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .rollback:disabled { color: var(--text-dim); opacity: .6; cursor: default; }
 .rollback:disabled:hover { background: var(--hover); color: var(--text-dim); }
 .history-none { padding: 4px 32px 8px; font-size: 12px; color: var(--text-dim); }
+
+/* ===== 侧栏底部:Git 版本历史(窄栏精简、限高独立滚动) ===== */
+.history-section {
+  flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column;
+  border-top: 1px solid var(--border); border-bottom: none;
+}
+.history-section .section-head-row { flex: none; }
+.sidebar-history { flex: 0 1 auto; min-height: 0; overflow-y: auto; max-height: min(34vh, 280px); }
+/* 侧栏宽度有限:紧凑排布,隐藏本地/远程双图标,时间列自适应,详情允许换行 */
+.sidebar-history .commit-row { padding: 5px 8px 5px 10px; }
+.sidebar-history .commit-main { gap: 5px; }
+.sidebar-history .commit-msg { font-size: 12px; }
+.sidebar-history .commit-loci { display: none; }
+.sidebar-history .commit-time { width: auto; font-size: 10px; }
+.sidebar-history .commit-detail { flex-wrap: wrap; font-size: 10px; gap: 4px; }
+.sidebar-history .commit-body { font-size: 12px; }
+.sidebar-history .rollback { font-size: 11px; }
+.sidebar-history .history-none { padding: 6px 10px; }
+/* 简洁模式(48px 图标轨道)不展示历史 */
+#sidebar.collapsed #sec-history { display: none; }
 
 .mono { font-family: var(--mono); color: var(--accent); }
 
@@ -864,6 +913,43 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
   color: var(--text-dim); display: flex; align-items: center; justify-content: center;
   min-height: 100%; padding: 8px 12px;
 }
+
+/* ===== 右侧编辑器:标签栏 + 代码视图 + 三方合并对比 ===== */
+#btn-toggle-editor.active {
+  background: var(--accent-faint); border-color: var(--accent); color: var(--accent-bright);
+}
+.diff-head { height: 34px; gap: 6px; }
+.editor-tabs { display: flex; align-self: stretch; flex: none; }
+.editor-tab {
+  padding: 0 10px; font-size: 12px; color: var(--text-dim); cursor: pointer;
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+}
+.editor-tab:hover { color: var(--text); }
+.editor-tab.active { color: var(--accent-bright); border-bottom-color: var(--accent); }
+/* 带行号的代码视图 */
+.code-view { min-width: 0; }
+.c-row { display: flex; align-items: baseline; }
+.c-num {
+  flex: none; width: 40px; padding-right: 10px; text-align: right;
+  font-size: 11.5px; color: var(--text-dim); border-right: 1px solid var(--border);
+  user-select: none; -webkit-user-select: none;
+}
+.c-text { flex: 1; min-width: 0; padding-left: 10px; white-space: pre-wrap; word-break: break-word; }
+/* 三方合并:BASE / OURS / THEIRS 等宽并排,各自独立滚动 */
+.merge-grid { display: flex; min-height: 100%; align-items: stretch; }
+.merge-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.merge-col + .merge-col { border-left: 1px solid var(--border); }
+.merge-col-head {
+  flex: none; position: sticky; top: 0; z-index: 1;
+  padding: 6px 10px; font-size: 11.5px; color: var(--text-head);
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.merge-col-body { flex: 1; min-height: 0; }
+.m-base .merge-col-head { color: var(--text-dim); }
+.m-ours .merge-col-head { color: var(--blue); }
+.m-theirs .merge-col-head { color: var(--status-remote); }
+.merge-col .c-num { width: 30px; padding-right: 6px; }
+
 .dlg-actions { display: flex; align-items: center; gap: 8px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-head); }
 /* 纵向布局下按钮按内容自适应宽度,不撑满整行 */
@@ -1379,6 +1465,11 @@ select {
 .cli-select {
   width: 100%; min-width: 0; height: 32px;
 }
+/* AI 配置连接测试:按钮 + 结果状态文字 */
+.ai-test-field { padding-top: 4px; border-top: 1px solid var(--border); }
+.ai-test-status { font-size: 12px; color: var(--text-dim); line-height: 1.5; word-break: break-word; }
+.ai-test-status.ok { color: var(--green); }
+.ai-test-status.bad { color: var(--red); }
 
 /* 首页品牌标题光学对齐:字形重心(含 y 下伸)仅比行盒中心低约 1px,图标微降 1px 即可;4px 会明显偏低 */
 #dashboard .dash-head > .dash-title {

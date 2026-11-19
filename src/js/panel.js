@@ -3,7 +3,7 @@
 import { $, invoke, toast, setButtonLoading, STATUS_CHARS, repo, view, repos, lastShipStatus, setLastShipStatus, setNumBadge } from "./state.js";
 import { updateProjectHeader, renderRepoList, removeRepo } from "./sidebar.js";
 import { renderHistory } from "./history.js";
-import { toggleStage, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache } from "./git-ops.js";
+import { toggleStage, stagePaths, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache } from "./git-ops.js";
 
 const sectionUserSet = new Set(); // 用户手动切换过的分组:自动收起规则不再覆盖其状态
 
@@ -72,7 +72,9 @@ function hideRefreshing() {
 export async function showEmpty(showInit) {
   const { leaveOverview } = await import("./dashboard.js");
   leaveOverview();
-  closeDiffPanel(); // 离开仓库视图,右侧 diff 不再有归属
+  closeDiffPanel(); // 离开仓库视图,右侧编辑器不再有归属
+  $("sec-history").classList.add("hidden"); // 空态不展示历史
+  syncEditorToggle();
   // 无项目时隐藏标题栏;当前选中项不是 Git 仓库时仍保留(项目已选定)
   $("project-header").classList.toggle("hidden", !repo);
   $("toolbar").classList.add("hidden"); // 空态无 Git 操作,隐藏顶部工具栏
@@ -114,6 +116,7 @@ export async function showPanel(st) {
   $("toolbar").classList.remove("hidden"); // 仓库面板恢复顶部工具栏
   await hideRefreshing();
   $("panel").classList.remove("hidden");
+  $("sec-history").classList.remove("hidden"); // 版本历史位于侧栏底部,仓库视图显示
 
   renderList("conflict-list", st.conflicts, "conflict", $("conflict-count"));
   // 暂存计数弱化显示:灰字无胶囊(暂存是中间态,提示强度低于实际更改)
@@ -131,7 +134,8 @@ export async function showPanel(st) {
   // 仅作为默认展示规则——用户手动切换过的分组保持其状态,刷新不覆盖。
   if (!sectionUserSet.has("sec-staged")) setSectionOpen("sec-staged", "staged-list", st.staged.length > 0);
   if (!sectionUserSet.has("sec-unstaged")) setSectionOpen("sec-unstaged", "unstaged-list", st.unstaged.length + st.untracked.length > 0);
-  if (!sectionUserSet.has("sec-history")) setSectionOpen("sec-history", "history-container", false);
+  if (!sectionUserSet.has("sec-history")) setSectionOpen("sec-history", "history-container", true);
+  syncEditorToggle(); // 右侧编辑器可能曾被 ESC/总览关闭:按实际显隐复位开关
   // 右侧面板显示当前分支
   $("branch-name").textContent = st.detached ? "（分离）" : (st.branch || "（无分支）");
   $("branch-name").title = st.branch || "";
@@ -192,95 +196,230 @@ export function refreshShipButtons() {
   }
 }
 
-/* ===== 文件列表 ===== */
+/* ===== 文件树(暂存/更改/冲突) ===== */
+// 目录默认展开;用户收起的目录记入此集合(key = kind + ":" + 目录路径),刷新后保留状态
+const folderClosed = new Set();
+
+// 由扁平的文件列表构建目录树:目录节点 children 为 Map,文件节点保存原始 entry
+function buildTree(entries) {
+  const root = { type: "dir", children: new Map(), count: 0, depth: -1 };
+  for (const e of entries) {
+    const parts = String(e.path || "").split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i];
+      if (!seg) continue;
+      let next = node.children.get(seg);
+      if (!next) {
+        next = { type: "dir", name: seg, path: parts.slice(0, i + 1).join("/"), depth: i, children: new Map(), count: 0 };
+        node.children.set(seg, next);
+      }
+      next.count++;
+      node = next;
+    }
+    // 文件以完整路径为 key,避免同一目录下同名文件相互覆盖
+    node.children.set("f:" + e.path, { type: "file", entry: e });
+  }
+  return root;
+}
+
+// 目录在前、文件在后,同类按名称排序
+function sortedChildren(node) {
+  return [...node.children.values()].sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    const an = a.type === "dir" ? a.name : a.entry.path;
+    const bn = b.type === "dir" ? b.name : b.entry.path;
+    return an.localeCompare(bn);
+  });
+}
+
+const CARET_SVG = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+const FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" stroke="none"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2Z"/></svg>';
+const STAGE_FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
+const UNSTAGE_FOLDER_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>';
+
+// 递归收集目录(含子目录)下所有文件路径,供目录节点的批量按钮使用
+function collectFilePaths(dir) {
+  const paths = [];
+  for (const child of dir.children.values()) {
+    if (child.type === "dir") paths.push(...collectFilePaths(child));
+    else paths.push(child.entry.path);
+  }
+  return paths;
+}
+
+// 目录节点:点击标题展开/折叠其子列表;标题最右侧可批量暂存/取消暂存整个目录
+function folderNode(dir, kind) {
+  const children = sortedChildren(dir);
+  const li = document.createElement("li");
+  li.className = "tree-folder";
+
+  const head = document.createElement("div");
+  head.className = "tree-folder-head";
+  head.style.setProperty("--depth", dir.depth);
+  head.dataset.path = dir.path;
+  head.dataset.kind = kind;
+  const key = kind + ":" + dir.path;
+  const open = !folderClosed.has(key);
+  head.classList.toggle("closed", !open);
+
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  caret.innerHTML = CARET_SVG;
+  const ico = document.createElement("span");
+  ico.className = "folder-ic";
+  ico.innerHTML = FOLDER_SVG;
+  const label = document.createElement("span");
+  label.className = "folder-name";
+  label.textContent = dir.name;
+  const num = document.createElement("span");
+  setNumBadge(num, dir.count);
+  head.append(caret, ico, label, num);
+
+  // 父节点最右侧:批量暂存(更改)/取消暂存(暂存)该目录下所有文件
+  if (kind === "staged" || kind === "unstaged") {
+    const stage = kind === "unstaged";
+    const btn = document.createElement("button");
+    btn.className = "folder-batch";
+    btn.innerHTML = stage ? STAGE_FOLDER_SVG : UNSTAGE_FOLDER_SVG;
+    btn.title = stage ? "暂存此目录下所有更改" : "取消暂存此目录下所有文件";
+    btn.setAttribute("aria-label", btn.title);
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation(); // 不触发目录的展开/折叠
+      stagePaths(collectFilePaths(dir), stage);
+    });
+    head.appendChild(btn);
+  }
+  li.appendChild(head);
+
+  const ul = document.createElement("ul");
+  ul.className = "file-list tree-children";
+  ul.classList.toggle("hidden", !open);
+  for (const child of children) {
+    ul.appendChild(child.type === "dir"
+      ? folderNode(child, kind)
+      : fileRow(child.entry, kind, dir.depth + 1));
+  }
+  li.appendChild(ul);
+
+  head.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const closed = head.classList.toggle("closed");
+    ul.classList.toggle("hidden", closed);
+    if (closed) folderClosed.add(key); else folderClosed.delete(key);
+  });
+  return li;
+}
+
+// 文件行:沿用原有操作(暂存/忽略/丢弃/AI 解决),点击打开右侧编辑器
+function fileRow(e, kind, depth) {
+  const li = document.createElement("li");
+  li.className = "file-row tree-file" + (kind === "conflict" ? " conflict" : "");
+  li.style.setProperty("--depth", depth);
+
+  // 仅冲突列表保留状态字母徽标;暂存/更改列表不显示
+  if (kind === "conflict") {
+    const st = document.createElement("span");
+    st.className = "st st-" + stChar(e, kind);
+    st.textContent = stChar(e, kind);
+    li.appendChild(st);
+  }
+
+  const path = document.createElement("span");
+  path.className = "path";
+  // 目录已分层展示,行内只显示文件名(重命名同时显示原名)
+  const name = String(e.path).split("/").pop();
+  path.textContent = e.orig_path ? `${name} → ${String(e.orig_path).split("/").pop()}` : name;
+  path.title = e.path;
+  li.appendChild(path);
+
+  // 增删行数(仅暂存/更改;无变动不显示),增=绿、删=红
+  if (kind !== "conflict" && (e.added > 0 || e.deleted > 0)) {
+    const stat = document.createElement("span");
+    stat.className = "lines";
+    const a = document.createElement("span"); a.className = "add"; a.textContent = "+" + e.added;
+    const d = document.createElement("span"); d.className = "del"; d.textContent = "-" + e.deleted;
+    stat.append(a, d);
+    li.appendChild(stat);
+  }
+
+  const actions = document.createElement("span");
+  actions.className = "row-actions";
+
+  if (kind === "conflict") {
+    const b = document.createElement("button");
+    b.className = "resolve";
+    b.textContent = "AI 解决";
+    b.addEventListener("click", (ev) => { ev.stopPropagation(); resolveOne(e.path); });
+    actions.appendChild(b);
+  } else {
+    const b = document.createElement("button");
+    b.textContent = kind === "staged" ? "取消暂存" : "暂存";
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      toggleStage(e.path, kind === "staged");
+    });
+    actions.appendChild(b);
+    const ig = document.createElement("button");
+    ig.textContent = "忽略";
+    ig.addEventListener("click", (ev) => { ev.stopPropagation(); askIgnore(e.path); });
+    actions.appendChild(ig);
+    // 仅未暂存/未跟踪行提供「丢弃」(已跟踪→还原,未跟踪→删除)。
+    // 两步确认:第一次点击变「✓」待确认态,再点一次才丢弃;
+    // 光标一旦离开该行立即复原——避免从其他行回来时仍是对勾(误以为仍待确认)
+    if (kind === "unstaged") {
+      const di = document.createElement("button");
+      di.textContent = "丢弃";
+      let armed = false;
+      const reset = () => {
+        if (!armed) return;
+        armed = false;
+        di.textContent = "丢弃";
+        di.classList.remove("armed");
+      };
+      di.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (!armed) {
+          armed = true; di.textContent = "✓"; di.classList.add("armed");
+          return;
+        }
+        reset();
+        discardFile(e.path);
+      });
+      di.addEventListener("mouseleave", reset); // 移开光标立即复原
+      actions.appendChild(di);
+    }
+  }
+  li.appendChild(actions);
+
+  // 点击任意文件(含冲突)打开右侧编辑器;冲突文件默认落到「合并」页,
+  // 真正解决仍走行内的「AI 解决」按钮,避免误触
+  li.addEventListener("click", () => openEditor(e, kind));
+  return li;
+}
+
 // mods:数值 >0 时附加的修饰类(如 "dim" 弱化);zero:数值为 0 时的回落形态
 function renderList(listId, entries, kind, countEl, mods = "") {
   const ul = $(listId);
   ul.innerHTML = "";
+  ul.classList.add("file-tree");
   setNumBadge(countEl, entries.length, mods);
-  for (const e of entries) {
-    const li = document.createElement("li");
-    li.className = "file-row" + (kind === "conflict" ? " conflict" : "");
+  const tree = buildTree(entries);
+  for (const child of sortedChildren(tree)) {
+    ul.appendChild(child.type === "dir"
+      ? folderNode(child, kind)
+      : fileRow(child.entry, kind, 0));
+  }
+}
 
-    // 仅冲突列表保留状态字母徽标;暂存/更改列表不显示
-    if (kind === "conflict") {
-      const st = document.createElement("span");
-      st.className = "st st-" + stChar(e, kind);
-      st.textContent = stChar(e, kind);
-      li.appendChild(st);
-    }
-
-    const path = document.createElement("span");
-    path.className = "path";
-    path.textContent = e.orig_path ? `${e.path} → ${e.orig_path}` : e.path;
-    path.title = e.path;
-    li.appendChild(path);
-
-    // 增删行数(仅暂存/更改;无变动不显示),增=绿、删=红
-    if (kind !== "conflict" && (e.added > 0 || e.deleted > 0)) {
-      const stat = document.createElement("span");
-      stat.className = "lines";
-      const a = document.createElement("span"); a.className = "add"; a.textContent = "+" + e.added;
-      const d = document.createElement("span"); d.className = "del"; d.textContent = "-" + e.deleted;
-      stat.append(a, d);
-      li.appendChild(stat);
-    }
-
-    const actions = document.createElement("span");
-    actions.className = "row-actions";
-
-    if (kind === "conflict") {
-      const b = document.createElement("button");
-      b.className = "resolve";
-      b.textContent = "AI 解决";
-      b.addEventListener("click", (ev) => { ev.stopPropagation(); resolveOne(e.path); });
-      actions.appendChild(b);
-    } else {
-      const b = document.createElement("button");
-      b.textContent = kind === "staged" ? "取消暂存" : "暂存";
-      b.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        toggleStage(e.path, kind === "staged");
-      });
-      actions.appendChild(b);
-      const ig = document.createElement("button");
-      ig.textContent = "忽略";
-      ig.addEventListener("click", (ev) => { ev.stopPropagation(); askIgnore(e.path); });
-      actions.appendChild(ig);
-      // 仅未暂存/未跟踪行提供「丢弃」(已跟踪→还原,未跟踪→删除)。
-      // 两步确认:第一次点击变「✓」待确认态,再点一次才丢弃;
-      // 光标一旦离开该行立即复原——避免从其他行回来时仍是对勾(误以为仍待确认)
-      if (kind === "unstaged") {
-        const di = document.createElement("button");
-        di.textContent = "丢弃";
-        let armed = false;
-        const reset = () => {
-          if (!armed) return;
-          armed = false;
-          di.textContent = "丢弃";
-          di.classList.remove("armed");
-        };
-        di.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          if (!armed) {
-            armed = true; di.textContent = "✓"; di.classList.add("armed");
-            return;
-          }
-          reset();
-          discardFile(e.path);
-        });
-        di.addEventListener("mouseleave", reset); // 移开光标立即复原
-        actions.appendChild(di);
-      }
-    }
-    li.appendChild(actions);
-
-    li.addEventListener("click", () => {
-      if (kind === "conflict") resolveOne(e.path);
-      else showDiff(e, kind);
-    });
-
-    ul.appendChild(li);
+// 展开/折叠全部目录:任一目录处于收起态则全部展开,否则全部折叠
+function setAllFoldersOpen(listId, open) {
+  for (const head of $(listId).querySelectorAll(".tree-folder-head")) {
+    const key = head.dataset.kind + ":" + head.dataset.path;
+    if (open) folderClosed.delete(key); else folderClosed.add(key);
+    head.classList.toggle("closed", !open);
+    const child = head.nextElementSibling;
+    if (child && child.classList.contains("tree-children")) child.classList.toggle("hidden", !open);
   }
 }
 
@@ -321,29 +460,117 @@ function askIgnore(path) {
   $("dlg-ignore").classList.remove("hidden");
 }
 
-// 打开 diff 视图:整行点击在右侧面板展示差异
-let diffRepo = null; // diff 面板当前所属仓库,切换仓库时自动关闭
-async function showDiff(e, kind) {
+/* ===== 右侧代码/对比编辑器 =====
+   三个标签:差异(git diff)/ 代码(文件内容)/ 合并(BASE·OURS·THEIRS 三方对比)。
+   面板可整体隐藏,切换仓库、空态、总览、ESC 均统一收起。 */
+let diffRepo = null;        // 编辑器当前所属仓库,切换仓库时自动关闭
+let editorEntry = null;     // 当前文件条目
+let editorKind = null;      // staged | unstaged | conflict
+let editorTab = "diff";     // diff | code | merge
+let editorLoadSeq = 0;      // 异步加载序号:丢弃过期结果
+
+const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// 打开文件:设置标题与可用标签,展示面板并加载当前标签内容
+function openEditor(e, kind) {
   diffRepo = repo;
+  editorEntry = e;
+  editorKind = kind;
+  // 冲突文件总是从「合并」页进入;普通文件若停在「合并」页则回到「差异」页
+  if (kind === "conflict") editorTab = "merge";
+  else if (editorTab === "merge") editorTab = "diff";
   $("diff-title").textContent = e.path;
-  $("diff-content").innerHTML = '<span class="d-load">加载中…</span>';
-  $("diff-panel").classList.remove("hidden");
+  $("diff-title").title = e.path;
+  // 合并页只对冲突文件开放
+  document.querySelector('.editor-tab[data-tab="merge"]').classList.toggle("hidden", kind !== "conflict");
+  setEditorVisible(true);
+  setEditorTab(editorTab);
+}
+
+// 切换标签并加载对应内容
+function setEditorTab(tab) {
+  editorTab = tab;
+  document.querySelectorAll(".editor-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  loadEditorContent();
+}
+
+async function loadEditorContent() {
+  if (!editorEntry || !repo) return;
+  const seq = ++editorLoadSeq;
+  const e = editorEntry, kind = editorKind, tab = editorTab, targetRepo = repo;
+  const box = $("diff-content");
+  box.innerHTML = '<span class="d-load">加载中…</span>';
   try {
-    const diff = await invoke("git_diff", { repo, path: e.path, staged: kind === "staged" });
-    // 切换了仓库/面板已关闭:丢弃过期结果
-    if (diffRepo !== repo || $("diff-panel").classList.contains("hidden")) return;
-    $("diff-content").innerHTML = diff ? renderDiff(diff) : '<span class="d-empty">无差异内容</span>';
+    let html;
+    if (tab === "diff") {
+      const diff = await invoke("git_diff", { repo: targetRepo, path: e.path, staged: kind === "staged" });
+      html = diff ? renderDiff(diff) : '<span class="d-empty">无差异内容</span>';
+    } else if (tab === "code") {
+      // 已暂存文件看索引内容,其余看工作区内容
+      const text = await invoke("git_file_content", { repo: targetRepo, path: e.path, rev: kind === "staged" ? "INDEX" : "WORKTREE" });
+      html = renderCode(text);
+    } else {
+      // 合并:并排展示 BASE / OURS(当前分支) / THEIRS(传入分支)
+      const [base, ours, theirs] = await Promise.all([
+        invoke("git_file_content", { repo: targetRepo, path: e.path, rev: "BASE" }),
+        invoke("git_file_content", { repo: targetRepo, path: e.path, rev: "OURS" }),
+        invoke("git_file_content", { repo: targetRepo, path: e.path, rev: "THEIRS" }),
+      ]);
+      html = renderMerge(base, ours, theirs);
+    }
+    if (seq !== editorLoadSeq || diffRepo !== repo || $("diff-panel").classList.contains("hidden")) return;
+    box.innerHTML = html;
   } catch (err) {
-    if (diffRepo !== repo || $("diff-panel").classList.contains("hidden")) return;
-    $("diff-content").innerHTML = '<span class="d-empty">' + String(err) + "</span>";
+    if (seq !== editorLoadSeq || diffRepo !== repo || $("diff-panel").classList.contains("hidden")) return;
+    box.innerHTML = '<span class="d-empty">' + escapeHtml(String(err)) + "</span>";
   }
 }
 
-// 关闭右侧 diff 面板
-function closeDiffPanel() {
-  $("diff-panel").classList.add("hidden");
-  $("diff-content").innerHTML = "";
+// 带行号的代码视图
+function renderCode(text) {
+  if (text == null || text === "") return '<span class="d-empty">文件为空或无法预览</span>';
+  const lines = String(text).replace(/\n$/, "").split("\n");
+  return '<div class="code-view">' + lines.map((l, i) =>
+    `<div class="c-row"><span class="c-num">${i + 1}</span><span class="c-text">${escapeHtml(l)}</span></div>`
+  ).join("") + "</div>";
 }
+
+// 三方合并对比:BASE / OURS / THEIRS 三栏并排
+function renderMerge(base, ours, theirs) {
+  const col = (title, text, cls) =>
+    `<div class="merge-col ${cls}"><div class="merge-col-head">${escapeHtml(title)}</div><div class="merge-col-body">${renderCode(text)}</div></div>`;
+  return '<div class="merge-grid">' +
+    col("基础版本 BASE", base, "m-base") +
+    col("当前分支 OURS", ours, "m-ours") +
+    col("传入分支 THEIRS", theirs, "m-theirs") +
+    "</div>";
+}
+
+// 显示/隐藏右侧编辑器(切换仓库、空态、总览、ESC、关闭按钮统一走这里)
+function setEditorVisible(visible) {
+  $("diff-panel").classList.toggle("hidden", !visible);
+  if (!visible) {
+    editorEntry = null; diffRepo = null; editorLoadSeq++;
+    $("diff-content").innerHTML = "";
+  }
+  syncEditorToggle();
+}
+
+// 隐藏编辑器(供 main.js 的 ESC、dashboard 的总览调用)
+export function hideEditor() { setEditorVisible(false); }
+
+// 工具栏开关与按钮态:与实际面板显隐保持一致
+export function syncEditorToggle() {
+  const btn = $("btn-toggle-editor");
+  if (!btn) return;
+  const visible = !$("diff-panel").classList.contains("hidden");
+  btn.classList.toggle("active", visible);
+  btn.title = visible ? "隐藏代码对比面板" : "显示代码对比面板";
+  const close = $("btn-diff-close");
+  if (close) close.title = visible ? "关闭代码面板" : "显示代码面板";
+}
+
+function closeDiffPanel() { setEditorVisible(false); }
 
 // diff 渲染:只展示实际改动内容,滤掉 git diff 的元信息行
 // (diff --git / index / --- / +++ / @@ 均为定位或文件头信息,标题已含文件名,省略以保持简洁)
@@ -381,7 +608,30 @@ function normalizeGitignore(text) {
 export function bindPanelEvents() {
   $("btn-diff-close").addEventListener("click", closeDiffPanel);
 
-  // 右侧 diff 面板宽度拖拽调整(与侧栏 resizer 同款交互)
+  // 工具栏开关:显示/隐藏右侧代码对比面板
+  $("btn-toggle-editor").addEventListener("click", () => {
+    if ($("diff-panel").classList.contains("hidden")) {
+      setEditorVisible(true);
+      if (!editorEntry) $("diff-content").innerHTML = '<span class="d-empty">点击左侧文件查看代码、差异或合并视图</span>';
+    } else {
+      setEditorVisible(false);
+    }
+  });
+  // 编辑器标签切换
+  document.querySelectorAll(".editor-tab").forEach((b) =>
+    b.addEventListener("click", () => setEditorTab(b.dataset.tab))
+  );
+  // 文件树:展开/折叠全部目录
+  document.querySelectorAll(".tree-toggle-all").forEach((b) =>
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const heads = $(b.dataset.treeTarget).querySelectorAll(".tree-folder-head");
+      const anyClosed = [...heads].some((h) => h.classList.contains("closed"));
+      setAllFoldersOpen(b.dataset.treeTarget, anyClosed); // 有收起则全展开,否则全折叠
+    })
+  );
+
+  // 右侧编辑器宽度拖拽调整(与侧栏 resizer 同款交互)
   const DIFF_W_MIN = 240, DIFF_W_MAX = 900;
   let diffDragStartX = 0, diffDragStartW = 0;
   const onDiffDrag = (e) => {

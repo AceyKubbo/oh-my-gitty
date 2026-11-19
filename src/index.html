@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Hello Gitty</title>
   <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="stylesheet" href="styles.css?v=20260829001300" />
+  <link rel="stylesheet" href="styles.css?v=20261119000000" />
   <script>
     // 仅开发模式(http://localhost:1421)生效:检测源文件变更后自动刷新窗口
     if (location.protocol === "http:") {
@@ -54,6 +54,19 @@
       </button>
       <ul id="repo-list"></ul>
       <div id="sidebar-empty" class="sidebar-empty hidden">暂无项目，点击 + 添加</div>
+
+      <!-- Git 历史:从主区下沉到侧栏底部(窄栏精简展示,总览/空态隐藏) -->
+      <div class="section history-section" id="sec-history">
+        <div class="section-head-row">
+          <button class="section-head" data-target="history-container">
+            <span class="caret"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span>版本历史</span>
+            <span class="num-badge plain" id="history-count">0</span>
+          </button>
+        </div>
+        <div id="history-container" class="sidebar-history"></div>
+      </div>
+
       <div class="sidebar-footer">
         <button id="btn-pin" class="icon-btn" data-tip="窗口置顶">
           <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3Z"/></svg>
@@ -115,6 +128,11 @@
         <span class="busy-ind hidden" id="sb-busy">
           <span class="spinner"></span><span id="sb-busy-text">处理中…</span>
         </span>
+        <!-- 右侧代码/对比编辑器:点击切换显示/隐藏 -->
+        <button id="btn-toggle-editor" class="tool-btn" title="显示/隐藏代码对比面板">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/><path d="M14 4 10 20"/></svg>
+          代码
+        </button>
         <div class="more-wrap">
           <button id="btn-more" class="tool-btn">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
@@ -224,6 +242,7 @@
                 <span id="staged-title">暂存</span>
                 <span class="num-badge plain" id="staged-count">0</span>
               </button>
+              <button class="icon-btn sec-act tree-toggle-all" data-tree-target="staged-list" title="展开/折叠全部目录"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M12 8v8"/></svg></button>
               <button class="icon-btn sec-act" id="btn-unstage-all" title="取消全部暂存"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg></button>
             </div>
             <ul class="file-list" id="staged-list"></ul>
@@ -236,30 +255,26 @@
                 <span id="unstaged-title">更改</span>
                 <span class="num-badge plain" id="unstaged-count">0</span>
               </button>
+              <button class="icon-btn sec-act tree-toggle-all" data-tree-target="unstaged-list" title="展开/折叠全部目录"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M12 8v8"/></svg></button>
               <button class="icon-btn sec-act" id="btn-discard-all" title="取消所有修改"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg></button>
               <button class="icon-btn sec-act" id="btn-stage-all" title="全部暂存"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
             </div>
             <ul class="file-list" id="unstaged-list"></ul>
           </div>
 
-          <div class="section" id="sec-history">
-            <div class="section-head-row">
-              <button class="section-head" data-target="history-container">
-                <span class="caret"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
-                <span>版本</span>
-                <span class="num-badge plain" id="history-count">0</span>
-              </button>
-            </div>
-            <div id="history-container"></div>
-          </div>
         </div>
       </div>
 
-      <!-- 右侧 diff 面板:点击暂存/更改中的文件时展示差异 -->
+      <!-- 右侧代码/对比编辑器:点击文件在此查看代码、差异与冲突合并视图(可隐藏) -->
       <div id="diff-panel" class="hidden">
         <div class="diff-head">
+          <div class="editor-tabs" id="editor-tabs">
+            <button class="editor-tab active" data-tab="diff">差异</button>
+            <button class="editor-tab" data-tab="code">代码</button>
+            <button class="editor-tab hidden" data-tab="merge">合并</button>
+          </div>
           <span id="diff-title" class="diff-title">差异</span>
-          <button class="icon-btn" id="btn-diff-close" title="关闭 diff 面板">
+          <button class="icon-btn" id="btn-diff-close" title="关闭代码面板">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
           </button>
         </div>
@@ -424,6 +439,13 @@
                 <datalist id="cli-model-list"></datalist>
               </label>
             </div>
+            <div class="field ai-test-field">
+              <span class="field-row">
+                连接测试
+                <button class="mini-btn" id="btn-ai-test">测试配置</button>
+              </span>
+              <span id="ai-test-status" class="ai-test-status">点击按钮验证当前配置是否可用</span>
+            </div>
           </div>
           <div class="settings-tab hidden" data-tab="commit">
             <label class="field">
@@ -536,6 +558,6 @@
   <!-- 全局自定义 tooltip 浮层(悬停 [data-tip] 元素显示,见 js/tooltip.js) -->
   <div id="tooltip" class="tooltip hidden"></div>
 
-  <script type="module" src="main.js?v=20260829000000"></script>
+  <script type="module" src="main.js?v=20261119000000"></script>
 </body>
 </html>

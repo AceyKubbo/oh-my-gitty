@@ -4,7 +4,7 @@
    history(历史)、run-panel(运行服务器)、dashboard(多仓库总览)。 */
 import { $, invoke, toast, DEFAULT_AI, settings, setSettings, setRepo, repo, applyTheme, DEFAULT_THEME } from "./js/state.js";
 import { loadRepos, fetchRemote, setupDragDrop, bindSidebarEvents, closeCtxMenu } from "./js/sidebar.js";
-import { refresh, showEmpty, bindPanelEvents } from "./js/panel.js";
+import { refresh, showEmpty, bindPanelEvents, hideEditor } from "./js/panel.js";
 import { bindHistoryEvents } from "./js/history.js";
 import { bindGitEvents, initGitListeners } from "./js/git-ops.js";
 import { syncRunPanel, syncRunToggle, bindRunEvents, initRunListeners, refreshExternalStatus, closeRunCtxMenu, closeRunMoreMenu } from "./js/run-panel.js";
@@ -95,6 +95,8 @@ function openSettings() {
   $("set-cli-model").value = settings.ai.mode === "cli" ? (settings.ai.model || "") : "";
   $("set-commit-mode").value = settings.ai.commit_mode || "auto";
   $("set-custom-prompt").value = settings.ai.custom_prompt || "";
+  $("ai-test-status").textContent = "点击按钮验证当前配置是否可用";
+  $("ai-test-status").className = "ai-test-status";
   // 已保存的 CLI 选择先按保存值回显;扫描完成后若已不在结果中会被清掉
   cliSel = settings.ai.cli_tool ? { id: settings.ai.cli_tool, path: settings.ai.cli_path } : null;
   syncAiModeFields();
@@ -115,30 +117,42 @@ function syncAiModeFields() {
   $("ai-cli-fields").classList.toggle("hidden", !cli);
 }
 
+// 从设置表单收集 AI 配置;保存与「测试配置」共用,保证测试的就是即将保存的配置。
+// 校验失败返回 { error },成功返回 { config }。
+function collectAiConfig() {
+  const mode = $("set-ai-mode").value;
+  if (mode === "cli" && !cliSel) {
+    return { error: "请先扫描并选择一个 CLI 工具" };
+  }
+  return {
+    config: {
+      ...settings.ai, // 保留表单外字段(如 prompt_preset)
+      mode,
+      cli_tool: mode === "cli" ? cliSel.id : "",
+      cli_path: mode === "cli" ? cliSel.path : "",
+      base_url: $("set-base-url").value.trim() || DEFAULT_AI.base_url,
+      api_key: $("set-api-key").value.trim(),
+      // CLI 模式下模型可为空(使用该 CLI 自身的默认模型)
+      model: mode === "cli"
+        ? $("set-cli-model").value.trim()
+        : ($("set-model").value.trim() || DEFAULT_AI.model),
+      lang: "中文", // 语言配置已从 UI 移除,固定中文(后端反序列化需要该字段)
+      commit_mode: $("set-commit-mode").value,
+      custom_prompt: $("set-custom-prompt").value,
+    },
+  };
+}
+
 async function saveSettings() {
   // 主题已在选择时预览;保存时只需写入配置
   const theme = applyTheme($("set-theme").value);
-  const mode = $("set-ai-mode").value;
-  if (mode === "cli" && !cliSel) {
-    toast("请先扫描并选择一个 CLI 工具", false);
+  const collected = collectAiConfig();
+  if (collected.error) {
+    toast(collected.error, false);
     return;
   }
   settings.theme = theme;
-  settings.ai = {
-    ...settings.ai, // 保留表单外字段(如 prompt_preset)
-    mode,
-    cli_tool: mode === "cli" ? cliSel.id : "",
-    cli_path: mode === "cli" ? cliSel.path : "",
-    base_url: $("set-base-url").value.trim() || DEFAULT_AI.base_url,
-    api_key: $("set-api-key").value.trim(),
-    // CLI 模式下模型可为空(使用该 CLI 自身的默认模型)
-    model: mode === "cli"
-      ? $("set-cli-model").value.trim()
-      : ($("set-model").value.trim() || DEFAULT_AI.model),
-    lang: "中文", // 语言配置已从 UI 移除,固定中文(后端反序列化需要该字段)
-    commit_mode: $("set-commit-mode").value,
-    custom_prompt: $("set-custom-prompt").value,
-  };
+  settings.ai = collected.config;
   try {
     await invoke("settings_save", { settings });
     closeSettings();
@@ -147,6 +161,36 @@ async function saveSettings() {
     settings.theme = themeBeforeSettings;
     applyTheme(themeBeforeSettings);
     toast("保存失败：" + e, false);
+  }
+}
+
+// 测试当前 AI 配置:API 模式发最小请求验证 key/地址/模型,CLI 模式跑一次可执行文件。
+// 与保存共用 collectAiConfig,确保验证的就是当前表单里的配置。
+async function testAiConfig() {
+  const btn = $("btn-ai-test");
+  const status = $("ai-test-status");
+  const collected = collectAiConfig();
+  if (collected.error) {
+    status.textContent = collected.error;
+    status.className = "ai-test-status bad";
+    return;
+  }
+  btn.disabled = true;
+  status.textContent = "正在测试…";
+  status.className = "ai-test-status";
+  try {
+    const reply = await invoke("ai_test_config", {
+      settings: collected.config,
+      repo: repo || "",
+    });
+    const preview = (reply || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    status.textContent = "配置正常" + (preview ? "：" + preview : "");
+    status.className = "ai-test-status ok";
+  } catch (e) {
+    status.textContent = "测试失败：" + e;
+    status.className = "ai-test-status bad";
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -234,6 +278,14 @@ function bindDialogEvents() {
     else $("cli-model-list").innerHTML = "";
   });
   $("btn-cli-rescan").addEventListener("click", scanCliTools);
+  $("btn-ai-test").addEventListener("click", testAiConfig);
+  // 调用方式/凭据/模型变更时清掉上一次的测试结果,避免展示过期状态
+  for (const id of ["set-ai-mode", "set-base-url", "set-api-key", "set-model", "set-cli-model"]) {
+    $(id).addEventListener("change", () => {
+      $("ai-test-status").textContent = "配置已变更,请重新测试";
+      $("ai-test-status").className = "ai-test-status";
+    });
+  }
   // 设置页左侧菜单:切换分组
   document.querySelectorAll(".settings-nav-item").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -266,7 +318,7 @@ function bindGlobalDismiss() {
     if (e.key === "Escape") {
       $("more-menu").classList.add("hidden");
       $("dash-more-menu").classList.add("hidden");
-      $("diff-panel").classList.add("hidden"); // ESC 收起右侧 diff 面板
+      hideEditor(); // ESC 收起右侧代码对比面板
       closeCtxMenu();
       closeRunCtxMenu();
       closeRunMoreMenu();
