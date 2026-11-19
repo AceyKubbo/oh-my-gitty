@@ -349,17 +349,17 @@ const CLI_TOOLS: &[CliToolDef] = &[
     CliToolDef {
         id: "codebuddy",
         name: "CodeBuddy",
-        // CodeBuddy CN 装的是 buddycn;国际版/其它安装方式可能叫 codebuddy
-        bin: "buddycn",
-        alt_bins: &["codebuddy"],
-        // chat 子命令从 stdin 读取提示词(末尾的 "-" 即 stdin 占位);
-        // -m ask 为只读问答模式,避免 agent 模式误改仓库文件
-        args: &["chat", "-m", "ask", "-"],
-        model_flag: None, // chat 无 --model;模型在 CodeBuddy 自身配置(models.json / 设置)中选
-        models: &[],      // 扫描时从 ~/.codebuddy/models.json 动态读取
+        // CodeBuddy Code 的无头 CLI(别名 cbc);另两个是官方的低内存/独立构建
+        bin: "codebuddy",
+        alt_bins: &["cbc", "codebuddy-code", "codebuddy-lowmem"],
+        // -p/--print:非交互打印回复并退出(与 claude -p 同款);
+        // --tools "":禁用全部内置工具,只要纯文本回复,避免误改仓库文件
+        args: &["-p", "--tools", ""],
+        model_flag: Some("--model"),
+        models: &[], // 扫描时从 `codebuddy --help` 的 --model 说明动态解析
         list_args: None,
-        creds: &[".codebuddy", ".codebuddy/models.json"],
-        hint: "CodeBuddy CN 的聊天 CLI：会在 IDE 中打开聊天窗口，回复需在窗口中查看；模型在 CodeBuddy 设置里选择",
+        creds: &[".codebuddy", ".codebuddy/settings.json", ".codebuddycn"],
+        hint: "CodeBuddy Code 无头 CLI(-p)；模型 ID 取自 --model 列表，留空用其默认模型",
     },
 ];
 
@@ -426,30 +426,55 @@ async fn find_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> Option<(Str
     None
 }
 
-/// 解析 CodeBuddy models.json 的模型 ID(纯函数,便于测试)
+/// `codebuddy --help` 里 --model 说明的当前支持模型(解析失败时的兜底)。
+const CODEBUDDY_FALLBACK_MODELS: &[&str] = &[
+    "hy4flash-free", "hy4flash", "hy4std",
+    "deepseek-v4.1-flash", "deepseek-v4-pro",
+    "glm-5.3", "glm-5.3-flash", "glm-5.2",
+    "minimax-m3.1-flash", "minimax-m2.7",
+    "kimi-k3.1-pro", "kimi-k3-1", "kimi-k2.8-preview",
+    "step-5-preview", "mimo-v2.6-pro", "space-bunny",
+];
+
+/// 从 `codebuddy --help` 输出里解析 --model 支持的模型 ID(纯函数,便于测试)。
+/// 帮助文本形如 "... Currently supported: (hy4std, hy4flash-free, ...)"。
 fn parse_codebuddy_models(text: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Vec::new();
-    };
-    v.get("models")
-        .and_then(|m| m.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m.get("id").and_then(|x| x.as_str()))
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+    const MARK: &str = "Currently supported: (";
+    let Some(start) = text.find(MARK) else { return Vec::new() };
+    let rest = &text[start + MARK.len()..];
+    let Some(end) = rest.find(')') else { return Vec::new() };
+    rest[..end]
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
-/// 从 CodeBuddy 的模型配置(~/.codebuddy/models.json)读取模型 ID 作为 datalist 建议,
-/// 保证与用户在 CodeBuddy 里实际配置的模型一致。
-fn codebuddy_models() -> Option<Vec<String>> {
-    let home = user_home()?;
-    let text = std::fs::read_to_string(home.join(".codebuddy/models.json")).ok()?;
-    let ids = parse_codebuddy_models(&text);
-    (!ids.is_empty()).then_some(ids)
+/// 动态获取 CodeBuddy 当前支持的模型:解析 --help,随 CLI 版本自动更新;
+/// 失败时回落到内置列表,保证 datalist 始终可用。
+async fn codebuddy_models(bin: &str) -> Vec<String> {
+    use std::process::Stdio;
+    let fetched = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        cli_command(bin)
+            .arg("--help")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    if let Ok(Ok(out)) = fetched {
+        if out.status.success() {
+            let models = parse_codebuddy_models(&String::from_utf8_lossy(&out.stdout));
+            if !models.is_empty() {
+                return models;
+            }
+        }
+    }
+    CODEBUDDY_FALLBACK_MODELS.iter().map(|s| s.to_string()).collect()
 }
 
 async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInfo {
@@ -488,11 +513,9 @@ async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInf
         None if def.id == "ollama" => info.models.clear(), // 服务不可达:不给建议
         None => {}
     }
-    // CodeBuddy 的 chat 子命令没有模型列表参数,改为读它自己的 models.json
+    // CodeBuddy --model 无列表子命令,从 --help 动态解析当前支持的模型
     if def.id == "codebuddy" {
-        if let Some(models) = codebuddy_models() {
-            info.models = models;
-        }
+        info.models = codebuddy_models(&p).await;
     }
     info.ready = if def.id == "ollama" {
         !info.models.is_empty()
@@ -1117,30 +1140,30 @@ mod tests {
     }
 
     #[test]
-    fn codebuddy_uses_chat_subcommand_and_no_model_flag() {
+    fn codebuddy_uses_headless_print_mode() {
         let cb = tool_by_id("codebuddy").unwrap();
-        // chat 子命令只读问答 + stdin 占位,模型在 CodeBuddy 自身配置中选
-        assert_eq!(cli_args(cb, ""), vec!["chat", "-m", "ask", "-"]);
-        assert_eq!(cli_args(cb, "glm-5.3"), vec!["chat", "-m", "ask", "-"]);
-        assert!(cb.model_flag.is_none());
-        assert_eq!(cb.bin, "buddycn");
-        assert!(cb.alt_bins.contains(&"codebuddy"));
+        // -p 非交互打印 + 禁用工具;模型经 --model 传入
+        assert_eq!(cli_args(cb, ""), vec!["-p", "--tools", ""]);
+        assert_eq!(
+            cli_args(cb, "hy4flash-free"),
+            vec!["-p", "--tools", "", "--model", "hy4flash-free"]
+        );
+        assert_eq!(cb.model_flag, Some("--model"));
+        assert_eq!(cb.bin, "codebuddy");
+        assert!(cb.alt_bins.contains(&"cbc"));
     }
 
     #[test]
-    fn parses_codebuddy_models_json() {
-        let sample = r#"{"models":[
-            {"id":"auto","name":"auto"},
-            {"id":"glm-5.3-flash","name":"GLM-5.3-Flash"},
-            {"id":"","name":"empty"}
-        ]}"#;
+    fn parses_codebuddy_models_from_help() {
+        let sample = "Usage: codebuddy [options]\n  --model <model>  Model for the current session.\
+            Currently supported: (hy4std, hy4flash-free, glm-5.3-flash)\
+            \n  --verbose  Override verbose mode";
         assert_eq!(
             parse_codebuddy_models(sample),
-            vec!["auto", "glm-5.3-flash"]
+            vec!["hy4std", "hy4flash-free", "glm-5.3-flash"]
         );
-        // 非法 JSON / 缺 models 字段:回落空列表,不报错
-        assert!(parse_codebuddy_models("not json").is_empty());
-        assert!(parse_codebuddy_models(r#"{"other":1}"#).is_empty());
+        // 帮助文本变化/缺失时返回空列表,由调用方回落内置列表
+        assert!(parse_codebuddy_models("no model info here").is_empty());
     }
 
     #[test]
