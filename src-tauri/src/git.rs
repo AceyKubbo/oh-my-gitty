@@ -454,6 +454,32 @@ pub fn unstage_file(repo: &str, path: &str) -> Result<(), String> {
     }
 }
 
+/// 批量暂存/取消暂存一组路径(文件树中「暂存/取消暂存该目录下所有文件」使用)。
+/// 一次 git 调用完成,比逐个调用更省进程;unborn 分支沿用 unstage_file 的降级处理。
+pub fn stage_paths(repo: &str, paths: &[String], stage: bool) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    if stage {
+        let mut args = vec!["add", "--"];
+        for p in paths {
+            args.push(p);
+        }
+        run_git(repo, &args).map(|_| ())
+    } else {
+        let st = status(repo);
+        let mut args = if st.unborn {
+            vec!["rm", "--cached", "--quiet", "--"]
+        } else {
+            vec!["reset", "--quiet", "HEAD", "--"]
+        };
+        for p in paths {
+            args.push(p);
+        }
+        run_git(repo, &args).map(|_| ())
+    }
+}
+
 /// 把所有"已跟踪且命中忽略规则"的文件移出跟踪(仅删 index,保留工作区文件)。
 /// .gitignore 对已跟踪/已暂存文件不生效,需移出跟踪才会被忽略;
 /// ls-files -c -i --exclude-standard 一次取全(含目录/通配规则覆盖的其他文件)。

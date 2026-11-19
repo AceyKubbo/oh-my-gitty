@@ -130,6 +130,20 @@ async fn chat(cfg: &AiConfig, cwd: &str, system: &str, user: &str) -> Result<Str
     }
 }
 
+/// 测试当前 AI 配置是否可用:发一条极小的请求验证连通性与凭据,
+/// 成功返回模型回复(供前端展示),失败把原始错误透传给用户。
+/// API / CLI 两种调用方式都经 chat 分流,因此配置正确性与实际提交时一致。
+pub async fn test_config(cfg: &AiConfig, repo: &str) -> Result<String, String> {
+    let reply = chat(
+        cfg,
+        repo,
+        "你是一个连接测试助手。",
+        "请只回复两个字:正常。不要输出其它内容。",
+    )
+    .await?;
+    Ok(reply)
+}
+
 async fn chat_via_api(cfg: &AiConfig, system: &str, user: &str) -> Result<String, String> {
     if cfg.api_key.trim().is_empty() {
         return Err("尚未配置 AI API Key，请先打开设置完成配置".into());
@@ -297,7 +311,7 @@ const CLI_TOOLS: &[CliToolDef] = &[
         model_flag: Some("--model"),
         models: &[],
         list_args: Some(&["models"]),
-        creds: &[".config/crush/crush.json"],
+        creds: &[".config/crush/crush.json", "AppData/Roaming/crush/crush.json"],
         hint: "模型填 provider/model(见建议列表),留空用其默认模型",
     },
     CliToolDef {
@@ -308,7 +322,19 @@ const CLI_TOOLS: &[CliToolDef] = &[
         model_flag: Some("-m"),
         models: &[],
         list_args: Some(&["models"]),
-        creds: &[".local/share/opencode/auth.json"],
+        // opencode v2 已把登录凭据从 auth.json 迁到 SQLite(opencode.db);
+        // 同时保留配置目录兜底,避免版本差异导致误判为「未就绪」。
+        // Windows 下 XDG 目录映射到 %LOCALAPPDATA% / %APPDATA%(相对 USERPROFILE)。
+        creds: &[
+            ".local/share/opencode/auth.json",
+            ".local/share/opencode/opencode.db",
+            ".config/opencode/opencode.json",
+            ".config/opencode/cli.json",
+            "AppData/Local/opencode/auth.json",
+            "AppData/Local/opencode/opencode.db",
+            "AppData/Roaming/opencode/opencode.json",
+            "AppData/Roaming/opencode/cli.json",
+        ],
         hint: "模型格式为 provider/model，留空使用其默认模型",
     },
 ];
@@ -373,16 +399,15 @@ async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInf
         hint: def.hint.into(),
     };
     let mut path = find_in_dirs(def.bin, dirs);
-    #[cfg(unix)]
     if path.is_none() {
-        path = login_shell_which(def.bin).await;
+        path = shell_which(def.bin).await; // unix: shell profile ; windows: where.exe
     }
     let Some(p) = path else { return info };
     info.found = true;
     info.path = p.clone();
 
-    // 凭据检测:尽力而为(macOS 的 Keychain 类凭据文件探测不到也不影响实际可用)
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    // 凭据检测:尽力而为(Keychain/凭据管理器类凭据探测不到也不影响实际可用)
+    let home = user_home();
     let cred_ok = def.creds.is_empty() || home.as_ref().is_some_and(|h| {
         def.creds.iter().any(|c| h.join(c).exists())
     });
@@ -394,6 +419,7 @@ async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInf
         Some(list_args) => list_models(&p, list_args).await.filter(|m| !m.is_empty()),
         None => None,
     };
+    let models_ok = fetched.is_some();
     match fetched {
         Some(models) => info.models = models,
         None if def.id == "ollama" => info.models.clear(), // 服务不可达:不给建议
@@ -402,28 +428,103 @@ async fn probe_tool(def: &CliToolDef, dirs: &[std::path::PathBuf]) -> CliToolInf
     info.ready = if def.id == "ollama" {
         !info.models.is_empty()
     } else {
-        cred_ok
+        // 能列出模型说明提供方已配置好,比凭据文件探测更可靠
+        // (例:opencode v2 把凭据存进 SQLite,旧 auth.json 路径已不存在)
+        cred_ok || (def.list_args.is_some() && models_ok)
     };
     info.version = probe_version(&p).await;
     info
 }
 
-/// 追加的检索目录:补齐 GUI 启动时缺失的 PATH(Homebrew/用户级安装)
+/// 当前用户 HOME:Windows 无 HOME 约定(仅 Git Bash 等会设),优先 USERPROFILE。
+fn user_home() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(std::path::PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+    }
+}
+
+/// 相对 HOME 的安装目录列表。抽成纯函数(带平台开关)便于跨平台单测。
+/// GUI 启动的应用 PATH 极简,各类 AI CLI 的官方脚本/包管理器落点不同,必须显式覆盖,
+/// 否则「装了却扫不到」。
+fn home_install_rel_dirs(windows: bool) -> Vec<&'static str> {
+    let mut dirs = vec![
+        "bin",
+        ".local/bin",
+        ".cargo/bin",
+        ".opencode/bin",   // opencode 官方安装脚本默认落点
+        ".npm-global/bin", // npm 自定义全局 prefix
+        ".npm/bin",
+        ".local/share/npm/bin",
+        ".bun/bin",   // bun 全局安装
+        ".deno/bin",  // deno 全局安装
+        ".volta/bin", // volta 管理的 node 工具
+        ".asdf/shims",
+        ".local/share/fnm",
+        ".linuxbrew/bin",
+    ];
+    if windows {
+        dirs.extend([
+            "AppData/Roaming/npm", // npm 全局默认 prefix(Windows)
+            "scoop/shims",         // Scoop 安装的 CLI
+            "AppData/Local/Microsoft/WindowsApps", // App Execution Alias
+        ]);
+    }
+    dirs
+}
+
+fn home_install_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = home_install_rel_dirs(cfg!(windows))
+        .into_iter()
+        .map(|rel| home.join(rel))
+        .collect();
+    // nvm 多版本:每个 node 版本的 bin 都可能是某个 CLI 的安装位置
+    if let Ok(entries) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+        let mut nodes: Vec<_> = entries.flatten().map(|e| e.path().join("bin")).collect();
+        nodes.sort();
+        dirs.extend(nodes);
+    }
+    dirs
+}
+
+/// 追加的检索目录:补齐 GUI 启动时缺失的 PATH(Homebrew / Scoop / Chocolatey / 用户级安装)
 fn search_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     if let Some(pd) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&pd));
     }
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from);
-    if let Some(h) = &home {
-        for rel in ["bin", ".local/bin", ".cargo/bin"] {
-            dirs.push(h.join(rel));
-        }
+    if let Some(h) = user_home() {
+        dirs.extend(home_install_dirs(&h));
     }
-    for d in ["/opt/homebrew/bin", "/usr/local/bin"] {
+    #[cfg(unix)]
+    for d in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/home/linuxbrew/.linuxbrew/bin",
+    ] {
         dirs.push(std::path::PathBuf::from(d));
+    }
+    #[cfg(windows)]
+    {
+        if let Some(pd) = std::env::var_os("ProgramData") {
+            let pd = std::path::PathBuf::from(pd);
+            dirs.push(pd.join("chocolatey/bin")); // Chocolatey shims
+            dirs.push(pd.join("Programs"));
+        }
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            dirs.push(std::path::PathBuf::from(pf).join("nodejs"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(std::path::PathBuf::from(local).join("Programs"));
+        }
     }
     // 去重(保持首次出现顺序)
     let mut seen = std::collections::HashSet::new();
@@ -431,12 +532,28 @@ fn search_dirs() -> Vec<std::path::PathBuf> {
     dirs
 }
 
+/// 可执行文件候选名。Windows 的可执行文件带扩展名,且 npm 全局 CLI 多为 .cmd shim,
+/// 必须把 PATHEXT 常见后缀都试一遍(优先原生 .exe)。Rust 标准库会自动用 cmd.exe 执行 .bat/.cmd。
+fn exe_candidates(bin: &str, windows: bool) -> Vec<String> {
+    if !windows {
+        return vec![bin.to_string()];
+    }
+    let mut names = vec![bin.to_string()];
+    for ext in ["exe", "cmd", "bat", "ps1", "com"] {
+        names.push(format!("{bin}.{ext}"));
+    }
+    names
+}
+
 /// 在候选目录中查找可执行文件
 fn find_in_dirs(bin: &str, dirs: &[std::path::PathBuf]) -> Option<String> {
+    let names = exe_candidates(bin, cfg!(windows));
     for dir in dirs {
-        let cand = dir.join(bin);
-        if is_executable_file(&cand) {
-            return Some(cand.to_string_lossy().into_owned());
+        for name in &names {
+            let cand = dir.join(name);
+            if is_executable_file(&cand) {
+                return Some(cand.to_string_lossy().into_owned());
+            }
         }
     }
     None
@@ -457,47 +574,84 @@ fn is_executable_file(p: &std::path::Path) -> bool {
     }
 }
 
-/// 经登录 shell 探测命令位置:`$SHELL -l -c 'command -v <bin>'`,
-/// 兼容只在 shell profile 里配置 PATH 的安装方式(nvm/volta 等)。限时防卡。
+/// 统一构建 CLI 子进程:Windows 下隐藏控制台窗口(GUI 启动避免闪黑框);
+/// .bat/.cmd 由 Rust 标准库自动经 cmd.exe 执行,无需手动包装。
+fn cli_command(bin: &str) -> tokio::process::Command {
+    tokio::process::Command::from(crate::process::command(bin))
+}
+
+/// 经 shell 探测命令位置(兜底,覆盖仅在 shell 配置里追加 PATH 的安装)。
 #[cfg(unix)]
-async fn login_shell_which(bin: &str) -> Option<String> {
+async fn shell_which(bin: &str) -> Option<String> {
     use std::process::Stdio;
-    use tokio::process::Command;
     let shell = std::env::var("SHELL").ok().filter(|s| !s.trim().is_empty())?;
-    let out = tokio::time::timeout(
+    // 登录 shell(-l)只读 .zprofile/.bash_profile,而多数人把 PATH 写在 .zshrc/.bashrc 里;
+    // 因此登录与交互式(-i)两种模式都试,取任一命中的可执行路径。限时防卡。
+    for mode in ["-l", "-i"] {
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            cli_command(&shell)
+                .arg(mode)
+                .arg("-c")
+                .arg(format!("command -v {bin}"))
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await;
+        let Ok(Ok(out)) = res else { continue };
+        if !out.status.success() {
+            continue;
+        }
+        // command -v 对 alias/函数会输出不带路径的名字,子进程无法执行,丢弃
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if s.contains('/') && is_executable_file(std::path::Path::new(&s)) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+/// Windows 兜底:`where.exe` 按当前 PATH + PATHEXT 解析,能找到 App Execution Alias
+/// 及 PATH 中登记的安装(where 本身随系统自带,无需额外依赖)。
+#[cfg(windows)]
+async fn shell_which(bin: &str) -> Option<String> {
+    use std::process::Stdio;
+    let res = tokio::time::timeout(
         std::time::Duration::from_secs(4),
-        Command::new(&shell)
-            .arg("-l")
-            .arg("-c")
-            .arg(format!("command -v {bin}"))
+        cli_command("where.exe")
+            .arg(bin)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .output(),
     )
-    .await
-    .ok()?
-    .ok()?;
+    .await;
+    let Ok(Ok(out)) = res else { return None };
     if !out.status.success() {
         return None;
     }
-    // command -v 对 alias/函数会输出不带路径的名字,子进程无法执行,丢弃
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if !s.contains('/') {
-        return None;
+    // where 可能输出多行,取第一个真实存在的可执行文件
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let p = line.trim();
+        if !p.is_empty() && is_executable_file(std::path::Path::new(p)) {
+            return Some(p.to_string());
+        }
     }
-    is_executable_file(std::path::Path::new(&s)).then_some(s)
+    None
 }
 
 /// 探测版本号(首行,尽力而为)
 async fn probe_version(bin: &str) -> String {
     use std::process::Stdio;
-    use tokio::process::Command;
     let Ok(res) = tokio::time::timeout(
         std::time::Duration::from_secs(3),
-        Command::new(bin)
+        cli_command(bin)
             .arg("--version")
+            .env("PATH", child_path(bin)) // 脚本型 CLI(#!/usr/bin/env node)需完整 PATH 才能找到解释器
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -537,11 +691,11 @@ const MODELS_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// 解析 stdout 为模型名列表;命令失败返回 None
 async fn list_models(bin: &str, args: &[&str]) -> Option<Vec<String>> {
     use std::process::Stdio;
-    use tokio::process::Command;
     let res = tokio::time::timeout(
         MODELS_LIST_TIMEOUT,
-        Command::new(bin)
+        cli_command(bin)
             .args(args)
+            .env("PATH", child_path(bin)) // 同 --version:补齐解释器 PATH(GUI 启动环境极简)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -594,7 +748,7 @@ async fn chat_via_cli(cfg: &AiConfig, cwd: &str, system: &str, user: &str) -> Re
     // CLI 没有独立的 system 通道:系统指令与任务合并为一条提示词
     let prompt = format!("【系统指令】\n{system}\n\n【任务】\n{user}");
 
-    let mut cmd = tokio::process::Command::new(bin);
+    let mut cmd = cli_command(bin);
     cmd.args(cli_args(def, model));
     if !cwd.is_empty() {
         cmd.current_dir(cwd);
@@ -889,6 +1043,42 @@ mod tests {
         assert!(tool_by_id("claude").is_some());
         assert!(tool_by_id("ollama").is_some());
         assert!(tool_by_id("nonexistent").is_none());
+    }
+
+    #[test]
+    fn home_install_dirs_cover_both_platforms() {
+        // opencode 官方安装脚本默认落点 ~/.opencode/bin 必须覆盖,否则「装了却扫不到」
+        let unix = home_install_rel_dirs(false);
+        for want in [
+            "bin",
+            ".local/bin",
+            ".cargo/bin",
+            ".opencode/bin",
+            ".npm-global/bin",
+            ".bun/bin",
+        ] {
+            assert!(unix.iter().any(|r| *r == want), "Unix 缺少检索目录 {want}");
+        }
+        // Windows:npm 全局默认 prefix、Scoop shims 必须覆盖
+        let win = home_install_rel_dirs(true);
+        for want in ["AppData/Roaming/npm", "scoop/shims", ".opencode/bin"] {
+            assert!(win.iter().any(|r| *r == want), "Windows 缺少检索目录 {want}");
+        }
+    }
+
+    #[test]
+    fn exe_candidates_follow_platform() {
+        // Unix 直接查原名(带执行位即可)
+        assert_eq!(exe_candidates("opencode", false), vec!["opencode"]);
+        // Windows 必须覆盖 .exe 与 npm 的 .cmd shim,且原生 .exe 优先
+        let win = exe_candidates("opencode", true);
+        assert_eq!(win.first().unwrap(), "opencode");
+        assert!(win.iter().any(|n| n == "opencode.exe"));
+        assert!(win.iter().any(|n| n == "opencode.cmd"));
+        assert!(win.iter().any(|n| n == "opencode.bat"));
+        let exe = win.iter().position(|n| n == "opencode.exe").unwrap();
+        let cmd = win.iter().position(|n| n == "opencode.cmd").unwrap();
+        assert!(exe < cmd, ".exe 应优先于 .cmd");
     }
 
     #[test]

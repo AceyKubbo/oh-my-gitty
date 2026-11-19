@@ -929,6 +929,52 @@ async fn git_diff(repo: String, path: String, staged: bool) -> Result<String, St
     .map_err(|e| e.to_string())?
 }
 
+/// 批量暂存/取消暂存一组路径(目录节点上的批量按钮)。
+#[tauri::command]
+async fn git_stage_paths(repo: String, paths: Vec<String>, stage: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || git::stage_paths(&repo, &paths, stage))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// 读取仓库中某文件的内容,供右侧代码/合并编辑器使用。
+/// rev 取值:""(或 WORKTREE)=工作区文件;HEAD / INDEX / BASE / OURS / THEIRS 对应 git 对象
+/// (BASE/OURS/THEIRS 即冲突时的 :1/:2/:3 阶段)。二进制与超大文件直接报错,避免预览卡死。
+#[tauri::command]
+async fn git_file_content(repo: String, path: String, rev: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        const MAX_BYTES: u64 = 2 * 1024 * 1024;
+        if rev.is_empty() || rev == "WORKTREE" {
+            let p = std::path::Path::new(&repo).join(&path);
+            let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+            if meta.len() > MAX_BYTES {
+                return Err("文件过大，无法预览".to_string());
+            }
+            let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+            if bytes.contains(&0) {
+                return Err("二进制文件，无法预览".to_string());
+            }
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
+        } else {
+            let spec = match rev.as_str() {
+                "HEAD" => format!("HEAD:{path}"),
+                "INDEX" => format!(":0:{path}"),
+                "BASE" => format!(":1:{path}"),
+                "OURS" => format!(":2:{path}"),
+                "THEIRS" => format!(":3:{path}"),
+                _ => return Err("未知的版本标识".to_string()),
+            };
+            let out = git::run_git(&repo, &["show", &spec])?;
+            if out.len() > MAX_BYTES as usize {
+                return Err("文件内容过大，无法预览".to_string());
+            }
+            Ok(out)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 文件夹选择走 Rust 侧 dialog 插件,前端只依赖 core.invoke
 #[tauri::command]
 async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
@@ -1526,6 +1572,12 @@ fn ai_presets() -> Vec<ai::PromptPreset> {
     ai::presets()
 }
 
+/// 测试当前 AI 配置(API 直连或本地 CLI)是否可用,返回模型回复或错误
+#[tauri::command]
+async fn ai_test_config(settings: AiConfig, repo: String) -> Result<String, String> {
+    ai::test_config(&settings, &repo).await
+}
+
 #[tauri::command]
 async fn ai_resolve_file(settings: AiConfig, repo: String, path: String) -> Result<(), String> {
     ai::resolve_conflict_file(&settings, &repo, &path).await
@@ -1772,6 +1824,8 @@ pub fn run() {
             gitignore_write,
             git_clone,
             git_diff,
+            git_file_content,
+            git_stage_paths,
             pick_folder,
             pick_folders,
             window_set_always_on_top,
@@ -1808,6 +1862,7 @@ pub fn run() {
             git_checkout,
             ai_commit_message,
             ai_commit_message_stream,
+            ai_test_config,
             ai_presets,
             ai_resolve_file,
             ai_resolve_conflicts,
