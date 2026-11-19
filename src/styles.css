@@ -160,6 +160,78 @@
   --on-accent: #ffffff;
 }
 
+/* ===== 主题色方案 =====
+   data-accent 与 data-theme 正交:每套配色都分别给暗/亮两种模式定义强调色,
+   组合选择器(0,2,0)优先级高于上面的单属性主题块,确保切换明暗后强调色仍正确。
+   紫色(purple)即默认品牌色,不需要覆盖 —— 上面两个主题块已是它的取值。
+   只覆盖「强调色语义」的变量;git 状态色/图表色/头像色等语义色保持不变。 */
+/* 浅蓝 */
+[data-theme=dark][data-accent=lightblue] {
+  --accent: #1c7ab8; --accent-hover: #2f9bd8; --accent-bright: #7cc8f2;
+  --accent-soft: #1c7ab81a; --accent-faint: #1c7ab822;
+  --on-accent: #ffffff; --surface-active: #123044;
+}
+[data-theme=light][data-accent=lightblue] {
+  --accent: #0d76b3; --accent-hover: #0a6296; --accent-bright: #0b5f94;
+  --accent-soft: #0d76b31a; --accent-faint: #0d76b322;
+  --on-accent: #ffffff; --surface-active: #dceffa;
+}
+/* 深蓝 */
+[data-theme=dark][data-accent=darkblue] {
+  --accent: #4462e8; --accent-hover: #6580fb; --accent-bright: #93a8ff;
+  --accent-soft: #4462e81a; --accent-faint: #4462e822;
+  --on-accent: #ffffff; --surface-active: #1e2a52;
+}
+[data-theme=light][data-accent=darkblue] {
+  --accent: #3557d9; --accent-hover: #2b47b5; --accent-bright: #2a43a8;
+  --accent-soft: #3557d91a; --accent-faint: #3557d922;
+  --on-accent: #ffffff; --surface-active: #e2e8fb;
+}
+/* 黄色:黄色亮度高,实底按钮改用深色字保证对比;文字色也相应压深 */
+[data-theme=dark][data-accent=yellow] {
+  --accent: #e0a92e; --accent-hover: #efbd4e; --accent-bright: #f4cf72;
+  --accent-soft: #e0a92e1a; --accent-faint: #e0a92e22;
+  --on-accent: #1b1b1b; --surface-active: #3a2f12;
+}
+[data-theme=light][data-accent=yellow] {
+  --accent: #d1a02a; --accent-hover: #b9881c; --accent-bright: #8a6512;
+  --accent-soft: #d1a02a1a; --accent-faint: #d1a02a22;
+  --on-accent: #1a1a1f; --surface-active: #faf0d4;
+}
+/* 浅绿:暗色下绿色偏亮,配深色字;亮色下压深一档配白字 */
+[data-theme=dark][data-accent=lightgreen] {
+  --accent: #46c17d; --accent-hover: #63d296; --accent-bright: #86dcb0;
+  --accent-soft: #46c17d1a; --accent-faint: #46c17d22;
+  --on-accent: #14261c; --surface-active: #143524;
+}
+[data-theme=light][data-accent=lightgreen] {
+  --accent: #16875a; --accent-hover: #116c48; --accent-bright: #0f6b46;
+  --accent-soft: #16875a1a; --accent-faint: #16875a22;
+  --on-accent: #ffffff; --surface-active: #dff3e8;
+}
+/* 深绿 */
+[data-theme=dark][data-accent=darkgreen] {
+  --accent: #1a8055; --accent-hover: #2bab74; --accent-bright: #5fcb98;
+  --accent-soft: #1a80551a; --accent-faint: #1a805522;
+  --on-accent: #ffffff; --surface-active: #143427;
+}
+[data-theme=light][data-accent=darkgreen] {
+  --accent: #14663f; --accent-hover: #0f4d30; --accent-bright: #0e5537;
+  --accent-soft: #14663f1a; --accent-faint: #14663f22;
+  --on-accent: #ffffff; --surface-active: #dcefe3;
+}
+/* 红色 */
+[data-theme=dark][data-accent=red] {
+  --accent: #cf4444; --accent-hover: #e05e5e; --accent-bright: #f28b8b;
+  --accent-soft: #cf44441a; --accent-faint: #cf444422;
+  --on-accent: #ffffff; --surface-active: #3d1e1e;
+}
+[data-theme=light][data-accent=red] {
+  --accent: #c0392b; --accent-hover: #a12e22; --accent-bright: #a52d20;
+  --accent-soft: #c0392b1a; --accent-faint: #c0392b22;
+  --on-accent: #ffffff; --surface-active: #f9e3df;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* 隐藏所有滚动条,不占用页面空间(仍可用滚轮/触控滚动) */
@@ -612,7 +684,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 .file-row:hover .row-actions { display: inline-flex; background: var(--hover); }
 .row-actions button { font-size: 12px; line-height: 1.2; color: var(--accent-bright); padding: 1px 5px; border: none; border-radius: 3px; }
-.row-actions button:hover { background: var(--panel-2); color: var(--purple-5); }
+.row-actions button:hover { background: var(--panel-2); color: var(--accent-bright); }
 /* 丢弃两步确认:待确认态(✓)用红色强调,提醒再次点击才是真正丢弃 */
 .row-actions button.armed { color: var(--red); background: var(--status-danger-faint); }
 .row-actions button.armed:hover { background: var(--status-danger-soft); color: var(--red); }
@@ -766,7 +838,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
   visibility: hidden;
 }
 .commit-row:hover .rollback { visibility: visible; background: var(--hover); }
-.rollback:hover { background: var(--panel-2); color: var(--purple-5); }
+.rollback:hover { background: var(--panel-2); color: var(--accent-bright); }
 /* 当前版本占位(HEAD):悬停随行显示,淡灰弱化,不可点击 */
 .rollback:disabled { color: var(--text-dim); opacity: .6; cursor: default; }
 .rollback:disabled:hover { background: var(--hover); color: var(--text-dim); }
@@ -831,6 +903,24 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .settings-nav-item.active { background: var(--accent-faint); color: var(--accent-bright); border-right-color: var(--accent); }
 .settings-body { flex: 1; padding: 18px; overflow-y: auto; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .settings-tab { display: flex; flex-direction: column; gap: 12px; }
+/* 主题色色板:一行圆形色块,选中项用主题色描边环 + 对勾标记 */
+.accent-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 0 2px; }
+.accent-swatch {
+  width: 24px; height: 24px; flex: none; border-radius: 50%;
+  background: var(--swatch); border: 2px solid transparent;
+  box-shadow: inset 0 0 0 1px #00000026; cursor: pointer;
+  transition: transform .12s, box-shadow .12s;
+}
+.accent-swatch:hover { transform: scale(1.12); }
+.accent-swatch.selected {
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 2px var(--panel), 0 0 0 1px var(--border);
+}
+.accent-swatch.selected::after {
+  content: ""; display: block; width: 100%; height: 100%;
+  /* 对勾:白色描边,在深浅各色块上都清晰 */
+  background: no-repeat center/12px 12px url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 13l4 4L19 7'/></svg>");
+}
 .settings-dialog .dlg-actions { padding: 12px 18px; border-top: 1px solid var(--border); flex: none; }
 .dlg-hint { font-size: 13px; color: var(--text-dim); }
 /* 更新弹窗说明区:纯文本展示发布说明,超高滚动 */

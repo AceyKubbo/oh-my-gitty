@@ -2,7 +2,7 @@
    各功能域拆分在 js/ 下(ES modules,无打包器):state(共享状态/工具)、
    sidebar(侧栏/项目管理)、panel(仓库面板)、git-ops(Git 操作/AI)、
    history(历史)、run-panel(运行服务器)、dashboard(多仓库总览)。 */
-import { $, invoke, toast, DEFAULT_AI, settings, setSettings, setRepo, repo, applyTheme, DEFAULT_THEME } from "./js/state.js";
+import { $, invoke, toast, DEFAULT_AI, settings, setSettings, setRepo, repo, applyTheme, DEFAULT_THEME, applyAccent, DEFAULT_ACCENT, ACCENTS } from "./js/state.js";
 import { loadRepos, fetchRemote, setupDragDrop, bindSidebarEvents, closeCtxMenu } from "./js/sidebar.js";
 import { refresh, showEmpty, bindPanelEvents, hideEditor } from "./js/panel.js";
 import { bindHistoryEvents } from "./js/history.js";
@@ -26,6 +26,8 @@ async function init() {
   } catch (_) { settings.repos = []; }
   // 先用 settings 主题,但若 settings 是首次启动(无 theme 字段)走 DEFAULT_THEME 跟随系统
   applyTheme(settings.theme || DEFAULT_THEME);
+  // 主题色与明暗模式正交:旧配置无 accent 字段时回落默认紫色
+  applyAccent(settings.accent || DEFAULT_ACCENT);
   applyUiScale();
   // 旧配置迁移:last_repo 不在列表时补进列表
   if (settings.last_repo && !settings.repos.includes(settings.last_repo)) {
@@ -84,6 +86,18 @@ async function init() {
 let cliScanCache = null;
 let cliSel = null;
 let themeBeforeSettings = DEFAULT_THEME;
+let accentBeforeSettings = DEFAULT_ACCENT;
+let selectedAccent = DEFAULT_ACCENT; // 设置弹窗里当前选中的主题色
+
+// 渲染主题色色板;点击色块即时预览,保存才写入配置(与主题下拉一致)
+function renderAccentSwatches(active) {
+  const box = $("set-accent");
+  if (!box) return;
+  selectedAccent = active;
+  box.innerHTML = ACCENTS.map((a) =>
+    `<button type="button" class="accent-swatch${a.id === active ? " selected" : ""}" data-accent-id="${a.id}" data-tip="${a.label}" aria-label="${a.label}" style="--swatch:${a.swatch}"></button>`
+  ).join("");
+}
 
 // 右下角全局主题切换:图标与代码查看器一致(暗黑时显示太阳=点击转浅色)
 const THEME_SUN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
@@ -108,6 +122,8 @@ function toggleTheme() {
 function openSettings() {
   themeBeforeSettings = settings.theme || DEFAULT_THEME;
   $("set-theme").value = themeBeforeSettings;
+  accentBeforeSettings = settings.accent || DEFAULT_ACCENT;
+  renderAccentSwatches(accentBeforeSettings);
   $("set-ai-mode").value = settings.ai.mode === "cli" ? "cli" : "api";
   $("set-base-url").value = settings.ai.base_url || DEFAULT_AI.base_url;
   $("set-api-key").value = settings.ai.api_key || "";
@@ -126,7 +142,10 @@ function openSettings() {
 }
 
 function closeSettings(restoreTheme = false) {
-  if (restoreTheme) applyTheme(themeBeforeSettings);
+  if (restoreTheme) {
+    applyTheme(themeBeforeSettings);
+    applyAccent(accentBeforeSettings); // 取消时把即时预览的主题色也还原
+  }
   $("dlg-settings").classList.add("hidden");
 }
 
@@ -164,8 +183,9 @@ function collectAiConfig() {
 }
 
 async function saveSettings() {
-  // 主题已在选择时预览;保存时只需写入配置
+  // 主题与主题色已在选择时预览;保存时只需写入配置
   const theme = applyTheme($("set-theme").value);
+  const accent = applyAccent(selectedAccent);
   syncThemeToggle();
   const collected = collectAiConfig();
   if (collected.error) {
@@ -173,6 +193,7 @@ async function saveSettings() {
     return;
   }
   settings.theme = theme;
+  settings.accent = accent;
   settings.ai = collected.config;
   try {
     await invoke("settings_save", { settings });
@@ -180,7 +201,9 @@ async function saveSettings() {
     toast("设置已保存", true);
   } catch (e) {
     settings.theme = themeBeforeSettings;
+    settings.accent = accentBeforeSettings;
     applyTheme(themeBeforeSettings);
+    applyAccent(accentBeforeSettings);
     toast("保存失败：" + e, false);
   }
 }
@@ -290,6 +313,13 @@ function bindDialogEvents() {
   $("btn-settings-save").addEventListener("click", saveSettings);
   $("btn-settings-close").addEventListener("click", () => closeSettings(true));
   $("set-theme").addEventListener("change", (e) => { applyTheme(e.target.value); syncThemeToggle(); });
+  // 主题色色板:点击即预览并重绘选中环
+  $("set-accent").addEventListener("click", (e) => {
+    const swatch = e.target.closest(".accent-swatch");
+    if (!swatch) return;
+    const id = applyAccent(swatch.dataset.accentId);
+    renderAccentSwatches(id);
+  });
   // AI 调用方式切换;切到 CLI 时按需触发扫描
   $("set-ai-mode").addEventListener("change", () => {
     syncAiModeFields();

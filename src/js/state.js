@@ -8,13 +8,26 @@ export const $ = (id) => document.getElementById(id);
 export const DEFAULT_AI = { base_url: "https://api.deepseek.com", api_key: "", model: "deepseek-v4-flash", mode: "api", cli_tool: "", cli_path: "", lang: "中文", commit_mode: "auto", custom_prompt: "" };
 export const STATUS_CHARS = { A: "A", M: "M", D: "D", R: "R", C: "C", U: "?", "?": "?" };
 
-// 主题:缺省跟随当前系统偏好;数据键是 CSS [data-theme] 期望值
+// 主题明暗:缺省跟随当前系统偏好;数据键是 CSS [data-theme] 期望值
 export const THEMES = ["dark", "light"];
 const prefersLight = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: light)").matches;
 export const DEFAULT_THEME = prefersLight ? "light" : "dark";
 
+// 主题色(强调色):与明暗模式正交,任意搭配;紫色为默认品牌色。
+// swatch 仅用于设置弹窗里的色块预览,实际配色由 CSS [data-accent] 按明暗模式分别定义。
+export const ACCENTS = [
+  { id: "purple", label: "紫色（默认）", swatch: "#7d5cdf" },
+  { id: "lightblue", label: "浅蓝", swatch: "#2f9bd8" },
+  { id: "darkblue", label: "深蓝", swatch: "#5b78f5" },
+  { id: "yellow", label: "黄色", swatch: "#e0a92e" },
+  { id: "lightgreen", label: "浅绿", swatch: "#46c17d" },
+  { id: "darkgreen", label: "深绿", swatch: "#1a8055" },
+  { id: "red", label: "红色", swatch: "#cf4444" },
+];
+export const DEFAULT_ACCENT = "purple";
+
 /* ===== 共享可变状态(setter 供跨模块重绑) ===== */
-export let settings = { ai: { ...DEFAULT_AI }, last_repo: null, repos: [], run_commands: {}, run_urls: {}, run_history: [], run_hidden: {}, run_last: {}, diff_width: null, run_height: null, sidebar_dirty_only: false, sidebar_width: null, sidebar_collapsed: false, editor_dark: true, theme: DEFAULT_THEME };
+export let settings = { ai: { ...DEFAULT_AI }, last_repo: null, repos: [], run_commands: {}, run_urls: {}, run_history: [], run_hidden: {}, run_last: {}, diff_width: null, run_height: null, sidebar_dirty_only: false, sidebar_width: null, sidebar_collapsed: false, editor_dark: true, theme: DEFAULT_THEME, accent: DEFAULT_ACCENT };
 export let repos = []; // 侧栏仓库摘要列表
 export let repo = null; // 当前仓库路径
 export let view = "repo"; // 主区视图:repo(单项目面板) | overview(多仓库总览)
@@ -144,10 +157,18 @@ export function repoAvatarColor(path) {
   return { bg: AVATAR_COLORS[h % AVATAR_COLORS.length], fg: "var(--text-inverse)" };
 }
 
-// 把当前主题写到 <html data-theme>;CSS 用 [data-theme=dark|light] 覆盖变量。
+// 把当前明暗模式写到 <html data-theme>;CSS 用 [data-theme=dark|light] 覆盖变量。
 // 非法值或缺失回落 DEFAULT_THEME(首次启动跟随系统),旧 settings 的废弃主题值也走此回落。
 export function applyTheme(name) {
   const t = THEMES.includes(name) ? name : DEFAULT_THEME;
   document.documentElement.dataset.theme = t;
   return t;
+}
+
+// 把当前主题色写到 <html data-accent>;CSS 用 [data-accent=...] 配合明暗模式覆盖强调色变量。
+// 非法值或缺失回落 DEFAULT_ACCENT(旧配置无 accent 字段时自动用默认紫色)。
+export function applyAccent(name) {
+  const a = ACCENTS.some((x) => x.id === name) ? name : DEFAULT_ACCENT;
+  document.documentElement.dataset.accent = a;
+  return a;
 }

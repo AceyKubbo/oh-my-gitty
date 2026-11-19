@@ -24,7 +24,7 @@ So I built Oh My Gitty: a lightweight, standalone companion focused on Git manag
 - **Safe, controlled version operations** — browse local and remote history, and reset to any version after confirmation
 - **Lightweight and unobtrusive** — Tauri 2 + native frontend, ~5–8 MB installer, always-on-top window and system tray
 - **Privacy first** — Git operations run through your local git CLI; repository content stays on your machine by default
-- **Adaptable interface** — dark/light themes, a collapsible and resizable persistent sidebar, and a filter for repositories with uncommitted changes
+- **Adaptable interface** — dark/light themes plus 7 accent colors (purple, light/dark blue, yellow, light/dark green, red), each auto-adapted to both modes; a collapsible and resizable persistent sidebar; and a filter for repositories with uncommitted changes
 
 ## Features
 
