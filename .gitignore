@@ -24,11 +24,9 @@ __pycache__/
 
 bun.lock
 
-.github/
-
 .commandcode/
 
 package-lock.json
 
 
-Cargo.lock
+.github/

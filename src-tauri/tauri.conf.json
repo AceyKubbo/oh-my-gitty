@@ -28,7 +28,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4OUNCNTQxNEJFNEEyOTgKUldTWW91UkxRYldjV0ZzRXBQTlg5aHloSHd4aFdiY1MrUkErZjVWL1lMcm1hbWJEVnhHdnFzQ2wK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFQ0I0RDk4MEUzQTI2REEKUldUYUpqb09tRTNMcnFKYU5NRE1YaVh0aHB4aXYySElIY2pwWDduTElqcUg3SmJRT0xrQ1J1aUsK",
       "endpoints": [
         "https://github.com/AceyKubbo/oh-my-gitty/releases/latest/download/latest.json"
       ],
