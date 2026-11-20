@@ -489,7 +489,8 @@ function askIgnoreDir(dirPath) {
    面板可整体隐藏,切换仓库、空态、总览、ESC 均统一收起。 */
 let diffRepo = null;        // 编辑器当前所属仓库,切换仓库时自动关闭
 let editorEntry = null;     // 当前文件条目
-let editorKind = null;      // staged | unstaged | conflict
+let editorKind = null;      // staged | unstaged | conflict | commit(来自版本历史)
+let editorCommit = null;    // 版本历史联动:{ hash, short },非空表示查看的是「某提交的文件」
 let editorTab = "diff";     // diff | code | merge
 let editorLoadSeq = 0;      // 异步加载序号:丢弃过期结果
 
@@ -514,13 +515,33 @@ function openEditor(e, kind) {
   diffRepo = repo;
   editorEntry = e;
   editorKind = kind;
+  editorCommit = null;
   // 冲突文件总是从「合并」页进入;普通文件若停在「合并」页则回到「差异」页
   if (kind === "conflict") editorTab = "merge";
   else if (editorTab === "merge") editorTab = "diff";
   $("diff-title").textContent = e.path;
   $("diff-title").title = e.path;
+  $("diff-context").classList.add("hidden");
   // 合并页只对冲突文件开放
   document.querySelector('.editor-tab[data-tab="merge"]').classList.toggle("hidden", kind !== "conflict");
+  setEditorVisible(true);
+  setEditorTab(editorTab);
+}
+
+// 从版本历史打开某个提交改动的文件:右侧差异页展示「该提交 vs 当前代码」。
+// 由 history.js 在展开提交的文件清单后调用。
+export function openCommitFile(hash, short, file) {
+  diffRepo = repo;
+  editorCommit = { hash, short };
+  editorEntry = file;
+  editorKind = "commit";
+  if (editorTab === "merge") editorTab = "diff"; // 合并页只对冲突开放
+  $("diff-title").textContent = file.path;
+  $("diff-title").title = `${short} · ${file.path} · 与当前代码对比`;
+  const ctx = $("diff-context");
+  ctx.textContent = `对比 ${short} → 当前`;
+  ctx.classList.remove("hidden");
+  document.querySelector('.editor-tab[data-tab="merge"]').classList.add("hidden");
   setEditorVisible(true);
   setEditorTab(editorTab);
 }
@@ -535,17 +556,24 @@ function setEditorTab(tab) {
 async function loadEditorContent() {
   if (!editorEntry || !repo) return;
   const seq = ++editorLoadSeq;
-  const e = editorEntry, kind = editorKind, tab = editorTab, targetRepo = repo;
+  const e = editorEntry, kind = editorKind, tab = editorTab, targetRepo = repo, cm = editorCommit;
   const box = $("diff-content");
   box.innerHTML = '<span class="d-load">加载中…</span>';
   try {
     let html;
     if (tab === "diff") {
-      const diff = await invoke("git_diff", { repo: targetRepo, path: e.path, staged: kind === "staged" });
-      html = diff ? renderDiff(diff) : '<span class="d-empty">无差异内容</span>';
+      if (cm) {
+        // 版本历史联动:该提交的文件 vs 当前工作区代码
+        const diff = await invoke("git_commit_file_diff", { repo: targetRepo, hash: cm.hash, path: e.path });
+        html = diff ? renderDiff(diff) : '<span class="d-empty">该提交与当前代码无差异</span>';
+      } else {
+        const diff = await invoke("git_diff", { repo: targetRepo, path: e.path, staged: kind === "staged" });
+        html = diff ? renderDiff(diff) : '<span class="d-empty">无差异内容</span>';
+      }
     } else if (tab === "code") {
-      // 已暂存文件看索引内容,其余看工作区内容
-      const text = await invoke("git_file_content", { repo: targetRepo, path: e.path, rev: kind === "staged" ? "INDEX" : "WORKTREE" });
+      // 版本历史联动看该提交里的文件内容;否则已暂存看索引,其余看工作区
+      const rev = cm ? cm.hash : (kind === "staged" ? "INDEX" : "WORKTREE");
+      const text = await invoke("git_file_content", { repo: targetRepo, path: e.path, rev });
       html = renderCode(text);
     } else {
       // 合并:并排展示 BASE / OURS(当前分支) / THEIRS(传入分支)
@@ -588,8 +616,9 @@ function renderMerge(base, ours, theirs) {
 function setEditorVisible(visible) {
   $("diff-panel").classList.toggle("hidden", !visible);
   if (!visible) {
-    editorEntry = null; diffRepo = null; editorLoadSeq++;
+    editorEntry = null; editorCommit = null; diffRepo = null; editorLoadSeq++;
     $("diff-content").innerHTML = "";
+    $("diff-context").classList.add("hidden");
   }
   syncEditorToggle();
 }

@@ -1,6 +1,6 @@
 /* 历史时间线:本地/远程提交合并展示、强制回退 */
 import { $, invoke, toast, setButtonLoading, relTime, relTimeShort, repo, setNumBadge } from "./state.js";
-import { refresh } from "./panel.js";
+import { refresh, openCommitFile } from "./panel.js";
 
 export function renderHistory(h, branch) {
   const box = $("history-container");
@@ -89,6 +89,12 @@ function commitRow(c, headHash) {
     body.textContent = c.body;
     li.appendChild(body);
   }
+
+  // 展开后加载此提交改动的文件清单(懒加载),点击文件即在右侧查看「该提交 vs 当前代码」
+  const filesBox = document.createElement("div");
+  filesBox.className = "commit-files-box hidden";
+  li.appendChild(filesBox);
+
   li.addEventListener("click", () => {
     if (li.classList.contains("expanded")) {
       li.classList.remove("expanded");
@@ -96,8 +102,63 @@ function commitRow(c, headHash) {
     }
     document.querySelectorAll(".commit-row.expanded").forEach((el) => el.classList.remove("expanded"));
     li.classList.add("expanded");
+    loadCommitFiles(c.hash, c.short, filesBox);
   });
   return li;
+}
+
+// 懒加载 + 按行实例缓存:同一行展开/收起不重复请求;刷新重建 DOM 后自然重新加载
+async function loadCommitFiles(hash, short, box) {
+  if (box.dataset.loaded === "1") return;
+  box.dataset.loaded = "1";
+  box.classList.remove("hidden");
+  box.innerHTML = '<div class="commit-files-none">加载中…</div>';
+  const targetRepo = repo; // 捕获仓库:await 期间用户可能已切换项目
+  try {
+    const files = await invoke("git_commit_files", { repo: targetRepo, hash });
+    box.innerHTML = "";
+    if (!files || !files.length) {
+      box.innerHTML = '<div class="commit-files-none">此提交没有改动文件</div>';
+      return;
+    }
+    const ul = document.createElement("ul");
+    ul.className = "commit-files";
+    for (const f of files) {
+      const row = document.createElement("li");
+      row.className = "commit-file";
+      row.title = f.path + " · 点击查看与当前代码的差异";
+
+      const st = document.createElement("span");
+      st.className = "cf-status" + (f.status ? " s-" + f.status[0] : "");
+      st.textContent = f.status || "M";
+      const name = document.createElement("span");
+      name.className = "cf-name";
+      name.textContent = f.path.split("/").pop();
+      const lines = document.createElement("span");
+      lines.className = "cf-lines";
+      if (f.added > 0) {
+        const a = document.createElement("span");
+        a.className = "cf-add"; a.textContent = "+" + f.added;
+        lines.appendChild(a);
+      }
+      if (f.deleted > 0) {
+        const d = document.createElement("span");
+        d.className = "cf-del"; d.textContent = "-" + f.deleted;
+        lines.appendChild(d);
+      }
+      row.append(st, name, lines);
+      row.addEventListener("click", (ev) => {
+        ev.stopPropagation(); // 不触发表行的展开/收起
+        box.querySelectorAll(".commit-file.active").forEach((el) => el.classList.remove("active"));
+        row.classList.add("active");
+        openCommitFile(hash, short, f);
+      });
+      ul.appendChild(row);
+    }
+    box.appendChild(ul);
+  } catch (e) {
+    box.innerHTML = '<div class="commit-files-none">加载失败：' + String(e) + "</div>";
+  }
 }
 
 function mergeCommits(local, remote) {

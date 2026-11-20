@@ -861,6 +861,34 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .sidebar-history .commit-body { font-size: 12px; }
 .sidebar-history .rollback { font-size: 11px; }
 .sidebar-history .history-none { padding: 6px 10px; }
+/* 提交改动文件清单:展开提交后懒加载,点击文件在右侧查看与该提交对应的差异 */
+.commit-files-box { padding: 0 0 6px 17px; }
+.commit-files-box.hidden { display: none; }
+.commit-files {
+  list-style: none; margin: 0; padding: 2px 0 0;
+  border-left: 1px solid var(--border);
+}
+.commit-file {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px; border-radius: 3px;
+  font-size: 11px; color: var(--text); cursor: pointer;
+}
+.commit-file:hover { background: var(--hover); color: var(--accent-bright); }
+.commit-file.active { background: var(--accent-faint); color: var(--accent-bright); }
+.commit-file .cf-status {
+  flex: none; width: 11px; text-align: center;
+  font-family: var(--mono); color: var(--text-dim);
+}
+.commit-file .cf-status.s-A { color: var(--green); }
+.commit-file .cf-status.s-D { color: var(--red); }
+.commit-file .cf-name {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.commit-file .cf-lines { flex: none; font-family: var(--mono); font-size: 10px; }
+.commit-file .cf-add { color: var(--green); }
+.commit-file .cf-del { color: var(--red); margin-left: 4px; }
+.commit-files-none { padding: 2px 6px; font-size: 11px; color: var(--text-dim); }
 /* 简洁模式(48px 图标轨道)不展示历史 */
 #sidebar.collapsed #sec-history { display: none; }
 
@@ -1001,6 +1029,14 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
   text-transform: uppercase; letter-spacing: .4px;
   color: var(--text-head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 版本历史联动时标志当前对比来源(如「对比 a1b2c3d → 当前」) */
+.diff-context {
+  flex: 0 1 auto; min-width: 0; max-width: 45%;
+  padding: 2px 7px; border-radius: 10px;
+  font-size: 10.5px; color: var(--text-dim); background: var(--panel-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.diff-context.hidden { display: none; }
 .diff-head .icon-btn { width: 22px; height: 22px; } /* 紧凑于标题栏内 */
 .diff-content {
   font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
@@ -1087,6 +1123,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 #diff-panel.code-dark .editor-tab.active { color: #4fc1ff; }
 #diff-panel.code-dark .editor-tab.active::after { background: #4fc1ff; }
 #diff-panel.code-dark .diff-content { background: #1e1e1e; color: #d4d4d4; }
+#diff-panel.code-dark .diff-context { background: #2a2d2e; color: #9cdcfe; }
 #diff-panel.code-dark .d-ctx .d-text,
 #diff-panel.code-dark .c-text { color: #d4d4d4; }
 #diff-panel.code-dark .d-gutter,

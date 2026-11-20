@@ -931,6 +931,22 @@ async fn git_diff(repo: String, path: String, staged: bool) -> Result<String, St
     .map_err(|e| e.to_string())?
 }
 
+/// 某个提交改动的文件清单,供版本历史展开后展示。
+#[tauri::command]
+async fn git_commit_files(repo: String, hash: String) -> Result<Vec<git::CommitFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::commit_files(&repo, &hash))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// 某个提交的文件与当前工作区代码的差异,供右侧代码区联动展示。
+#[tauri::command]
+async fn git_commit_file_diff(repo: String, hash: String, path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || git::commit_file_diff(&repo, &hash, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// 批量暂存/取消暂存一组路径(目录节点上的批量按钮)。
 #[tauri::command]
 async fn git_stage_paths(repo: String, paths: Vec<String>, stage: bool) -> Result<(), String> {
@@ -941,7 +957,8 @@ async fn git_stage_paths(repo: String, paths: Vec<String>, stage: bool) -> Resul
 
 /// 读取仓库中某文件的内容,供右侧代码/合并编辑器使用。
 /// rev 取值:""(或 WORKTREE)=工作区文件;HEAD / INDEX / BASE / OURS / THEIRS 对应 git 对象
-/// (BASE/OURS/THEIRS 即冲突时的 :1/:2/:3 阶段)。二进制与超大文件直接报错,避免预览卡死。
+/// (BASE/OURS/THEIRS 即冲突时的 :1/:2/:3 阶段);也可直接传提交 hash(7~40 位十六进制,
+/// 用于版本历史联动时读取该提交版本的文件)。二进制与超大文件直接报错,避免预览卡死。
 #[tauri::command]
 async fn git_file_content(repo: String, path: String, rev: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -964,6 +981,13 @@ async fn git_file_content(repo: String, path: String, rev: String) -> Result<Str
                 "BASE" => format!(":1:{path}"),
                 "OURS" => format!(":2:{path}"),
                 "THEIRS" => format!(":3:{path}"),
+                // 版本历史联动:直接读取指定提交里的文件(<hash>:<path>)
+                _ if rev.len() >= 7
+                    && rev.len() <= 40
+                    && rev.chars().all(|c| c.is_ascii_hexdigit()) =>
+                {
+                    format!("{rev}:{path}")
+                }
                 _ => return Err("未知的版本标识".to_string()),
             };
             let out = git::run_git(&repo, &["show", &spec])?;
@@ -1830,6 +1854,8 @@ pub fn run() {
             gitignore_write,
             git_clone,
             git_diff,
+            git_commit_files,
+            git_commit_file_diff,
             git_file_content,
             git_stage_paths,
             pick_folder,

@@ -812,6 +812,92 @@ pub fn reset_hard(repo: &str, hash: &str) -> Result<String, String> {
     run_git(repo, &["reset", "--hard", hash])
 }
 
+/// 某个提交改动的文件清单(相对其第一个父提交;根提交相对空树)。
+/// status 为 A/M/D/T 等状态字母(--no-renames 下重命名拆成 A+D),
+/// added/deleted 为增删行数(二进制文件记为 0)。供版本历史展开后展示。
+#[derive(Serialize, Clone)]
+pub struct CommitFile {
+    pub path: String,
+    pub status: String,
+    pub added: i32,
+    pub deleted: i32,
+}
+
+pub fn commit_files(repo: &str, hash: &str) -> Result<Vec<CommitFile>, String> {
+    // 比较基准:第一个父提交(合并提交只看第一父,语义=此提交引入的改动);
+    // 根提交无父,git diff-tree 需加 --root 才会输出全部文件为新增。
+    let parents = run_git(repo, &["rev-list", "--parents", "-n", "1", hash])?;
+    let mut tokens = parents.split_whitespace();
+    let _ = tokens.next(); // 自身 hash
+    let parent = tokens.next().map(|s| s.to_string());
+    let base: Vec<&str> = match parent.as_deref() {
+        Some(p) => vec![p, hash],
+        None => vec!["--root", hash],
+    };
+
+    // name-status -z: <状态>\0<路径>\0 ... (无重命名时不存在双路径记录)
+    let mut ns_args: Vec<&str> = vec![
+        "diff-tree", "-r", "--no-commit-id", "--no-renames", "-z", "--name-status",
+    ];
+    ns_args.extend(base.iter().copied());
+    let ns = run_git(repo, &ns_args)?;
+    let mut statuses: HashMap<String, String> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    let fields: Vec<&str> = ns.split('\0').collect();
+    let mut i = 0;
+    while i + 1 < fields.len() {
+        let st = fields[i].trim().to_string();
+        let path = unquote(fields[i + 1]);
+        if !st.is_empty() && !path.is_empty() {
+            statuses.insert(path.clone(), st);
+            order.push(path);
+        }
+        i += 2;
+    }
+
+    // numstat -z: 每条记录以 NUL 结尾,记录内字段用 TAB 分隔(<增>\t<删>\t<路径>\0),
+    // 二进制文件时增删为 "-"。注意 -z 只改记录分隔符,字段间仍是 TAB。
+    let mut num_args: Vec<&str> = vec![
+        "diff-tree", "-r", "--no-commit-id", "--no-renames", "-z", "--numstat",
+    ];
+    num_args.extend(base.iter().copied());
+    let num = run_git(repo, &num_args)?;
+    let mut counts: HashMap<String, (i32, i32)> = HashMap::new();
+    let to_n = |s: &str| if s == "-" { 0 } else { s.parse().unwrap_or(0) };
+    for rec in num.split('\0') {
+        let mut f = rec.splitn(3, '\t');
+        let parsed = match (f.next(), f.next(), f.next()) {
+            (Some(a), Some(d), Some(p)) => Some((unquote(p), (to_n(a), to_n(d)))),
+            _ => None,
+        };
+        if let Some((path, pair)) = parsed {
+            counts.insert(path, pair);
+        }
+    }
+
+    Ok(order
+        .into_iter()
+        .map(|path| {
+            let (added, deleted) = counts.get(&path).copied().unwrap_or((0, 0));
+            CommitFile {
+                status: statuses.get(&path).cloned().unwrap_or_default(),
+                path,
+                added,
+                deleted,
+            }
+        })
+        .collect())
+}
+
+/// 某个提交的文件与「当前工作区代码」的差异。
+/// 减号行=该提交时的内容,加号行=现在的内容(git diff <commit> -- <path>)。
+pub fn commit_file_diff(repo: &str, hash: &str, path: &str) -> Result<String, String> {
+    run_git(
+        repo,
+        &["diff", "--no-color", "--no-ext-diff", hash, "--", path],
+    )
+}
+
 /// 本地分支列表
 pub fn local_branches(repo: &str) -> Vec<String> {
     run_git(repo, &["branch", "--format=%(refname:short)"])
@@ -1089,6 +1175,46 @@ mod tests {
         assert_eq!(commits2.len(), 1);
         assert_eq!(commits2[0].subject, "first");
         assert_eq!(head_hash(r).as_deref(), Some(commits2[0].hash.as_str()));
+        std::fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn commit_files_and_diff_against_worktree() {
+        let repo = temp_repo("commit-files");
+        let r = repo.to_str().unwrap();
+        std::fs::write(repo.join("a.txt"), "v1\n").unwrap();
+        std::fs::write(repo.join("keep.txt"), "keep\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "init").unwrap();
+
+        // 根提交:全部文件都是新增
+        let root = log(r, 10).pop().unwrap();
+        let root_files = commit_files(r, &root.hash).unwrap();
+        assert_eq!(root_files.len(), 2);
+        assert!(root_files.iter().all(|f| f.status == "A"));
+
+        // 第二个提交:修改 a.txt,新增 b.txt
+        std::fs::write(repo.join("a.txt"), "v2\n").unwrap();
+        std::fs::write(repo.join("b.txt"), "new\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "second").unwrap();
+
+        let head = log(r, 10)[0].clone();
+        let files = commit_files(r, &head.hash).unwrap();
+        assert_eq!(files.len(), 2, "应列出该提交改动的 2 个文件");
+        let a = files.iter().find(|f| f.path == "a.txt").unwrap();
+        let b = files.iter().find(|f| f.path == "b.txt").unwrap();
+        assert_eq!(a.status, "M", "a.txt 应为修改");
+        assert_eq!(b.status, "A", "b.txt 应为新增");
+        assert_eq!((a.added, a.deleted), (1, 1));
+        assert_eq!((b.added, b.deleted), (1, 0));
+
+        // 工作区再次改动 b.txt:该提交版本 vs 当前代码的差异应同时含 -new/+changed
+        std::fs::write(repo.join("b.txt"), "changed\n").unwrap();
+        let d = commit_file_diff(r, &head.hash, "b.txt").unwrap();
+        assert!(d.contains("-new"), "应含该提交时的旧行: {d}");
+        assert!(d.contains("+changed"), "应含当前代码的新行: {d}");
+
         std::fs::remove_dir_all(repo).ok();
     }
 
