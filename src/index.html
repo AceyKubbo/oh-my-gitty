@@ -12,7 +12,7 @@
       (function () {
         const files = ["index.html", "styles.css", "main.js",
           "js/state.js", "js/sidebar.js", "js/panel.js", "js/git-ops.js",
-          "js/history.js", "js/run-panel.js", "js/dashboard.js"];
+          "js/history.js", "js/run-panel.js", "js/dashboard.js", "js/version.js"];
         const mtimes = {};
         setInterval(async () => {
           for (const f of files) {
@@ -148,6 +148,11 @@
             <button id="btn-more-remove" class="danger-item">关闭项目</button>
           </div>
         </div>
+        <!-- 全局工具栏最右:升级当前工程版本号(自适应识别版本文件) -->
+        <button id="btn-bump-version" class="tool-btn" title="升级当前工程版本号">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+          升级版本
+        </button>
       </section>
 
       <!-- 主区行:左侧仓库面板 + 右侧 diff 面板(点击文件在右侧展示差异,不遮挡操作区) -->
@@ -550,6 +555,37 @@
       </div>
     </div>
   </div>
+  <!-- 升级当前工程版本号:自适应识别版本文件 + 选择升级级别 -->
+  <div class="overlay hidden" id="dlg-version-bump">
+    <div class="dialog">
+      <h3>升级版本号</h3>
+      <p class="dlg-hint">当前版本 <span id="vb-current" class="mono"></span>，将同步更新检测到的版本文件。</p>
+      <div class="vb-files" id="vb-files"></div>
+      <div class="vb-levels" id="vb-levels">
+        <label class="vb-level">
+          <input type="radio" name="vb-level" value="patch" checked />
+          <span class="vb-level-main">补丁版本<span class="vb-level-note">修复问题</span></span>
+          <span class="vb-example mono" id="vb-ex-patch"></span>
+        </label>
+        <label class="vb-level">
+          <input type="radio" name="vb-level" value="minor" />
+          <span class="vb-level-main">次版本<span class="vb-level-note">新增功能</span></span>
+          <span class="vb-example mono" id="vb-ex-minor"></span>
+        </label>
+        <label class="vb-level">
+          <input type="radio" name="vb-level" value="major" />
+          <span class="vb-level-main">主版本<span class="vb-level-note">不兼容变更</span></span>
+          <span class="vb-example mono" id="vb-ex-major"></span>
+        </label>
+      </div>
+      <div class="dlg-actions">
+        <button class="tool-btn" id="btn-vb-cancel">取消</button>
+        <span class="spacer"></span>
+        <button class="tool-btn primary" id="btn-vb-confirm">确认升级</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast"></div>
 
   <!-- 侧栏右键菜单(侧栏项目 + 项目卡片 ⋯ 共用) -->

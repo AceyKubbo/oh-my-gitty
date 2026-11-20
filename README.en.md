@@ -61,6 +61,21 @@ Once installed, the app checks for updates on startup; you can also check manual
 >
 > The Windows installer does not yet use a commercial code-signing certificate. If SmartScreen appears, verify that the installer came from this repository before choosing Run anyway.
 
+### Terminal command `gitty`
+
+On **first launch**, the app automatically installs a `gitty` command into your PATH (macOS: `/usr/local/bin`, falling back to `~/.local/bin` plus a shell config entry when not writable; Windows: `%LOCALAPPDATA%\OhMyGitty\bin`, appended to the user PATH). No manual setup is needed. Development mode (`npm run dev`) does not install it.
+
+Run it from any project directory:
+
+```bash
+cd /path/to/your/project
+gitty
+```
+
+This launches (or focuses the already running) Oh My Gitty, adds the **current directory** to the project list, and switches to it — similar to `code .`. You can also pass an explicit path: `gitty /path/to/another/project` (the last existing directory wins).
+
+> Reopen your terminal after installation (especially on Windows) so the PATH change takes effect.
+
 ### Build from source
 
 Requires [Node.js](https://nodejs.org/) 18+ and [Rust](https://www.rust-lang.org/). On Windows, also install Microsoft C++ Build Tools and WebView2 per the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).

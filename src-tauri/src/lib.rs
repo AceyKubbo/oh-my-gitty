@@ -1,8 +1,10 @@
 mod ai;
+mod cli;
 mod config;
 mod git;
 mod process;
 mod runner;
+mod version;
 mod watcher;
 
 use ai::{AiConfig, ConflictOutcome};
@@ -822,7 +824,7 @@ fn scan_repos(dir: &std::path::Path, depth: usize, found: &mut Vec<String>) {
 }
 
 /// 路径归一化:去掉尾部分隔符,统一用于重复判断(不做 canonicalize,避免未存在的路径报错)
-fn normalize(p: &str) -> String {
+pub(crate) fn normalize(p: &str) -> String {
     let normalized = p.replace('\\', "/").trim_end_matches('/').to_string();
     if cfg!(windows) {
         normalized.to_lowercase()
@@ -1803,7 +1805,11 @@ fn open_local_dir(_path: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // `gitty` 二次启动:应用参数里带 --gitty-open-dir 时,打开并切换到该目录
+            if let Some(dir) = cli::open_dir_from_args(args.iter()) {
+                cli::open_repo(app, &dir);
+            }
             // 重复启动时聚焦已有窗口,不创建第二个实例
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
@@ -1875,6 +1881,8 @@ pub fn run() {
             server_external_check,
             server_external_check_all,
             server_external_stop,
+            version::project_version_detect,
+            version::project_version_bump,
         ])
         .on_window_event(|window, event| {
             // 关闭窗口不退出应用,隐藏到系统托盘常驻
@@ -1886,6 +1894,13 @@ pub fn run() {
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+            // 首次启动(无已有实例):处理 `gitty` 传入的目录参数,并安装命令行入口。
+            // 二次启动的相同参数由上面的 single-instance 回调处理。
+            if let Some(dir) = cli::open_dir_from_env() {
+                cli::open_repo(app.handle(), &dir);
+            }
+            cli::ensure_installed();
 
             let show = MenuItem::with_id(app, "show", "显示 Oh My Gitty", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;

@@ -61,6 +61,21 @@ Oh My Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
 >
 > Windows 安装包暂未使用商业代码签名证书；SmartScreen 提示时，请确认文件来自本仓库后选择「仍要运行」。
 
+### 终端命令行入口 `gitty`
+
+应用**首次启动**时会自动把 `gitty` 命令安装到 PATH（macOS 优先 `/usr/local/bin`，无写权限时退回 `~/.local/bin` 并补写 shell 配置；Windows 写入 `%LOCALAPPDATA%\OhMyGitty\bin` 并追加到用户 PATH），无需手动配置。开发模式（`npm run dev`）不会安装。
+
+在任意项目目录里执行：
+
+```bash
+cd /path/to/your/project
+gitty
+```
+
+即可启动（或聚焦已运行的）Oh My Gitty，并把**当前目录**加入项目列表、切换到该项目——类似 `code .` 的体验。若应用已在运行，新目录会自动切换到前台。也可显式指定路径：`gitty /path/to/another/project`（以最后一个存在的目录为准）。
+
+> 安装后需**重新打开终端**（Windows 上尤其如此），PATH 修改才会在新终端里生效。开发模式不会安装该命令。
+
 ### 从源码构建
 
 需要 [Node.js](https://nodejs.org/) 18+ 和 [Rust](https://www.rust-lang.org/)。Windows 还需要按 [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) 安装 Microsoft C++ Build Tools 与 WebView2。

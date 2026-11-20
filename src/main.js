@@ -2,14 +2,15 @@
    各功能域拆分在 js/ 下(ES modules,无打包器):state(共享状态/工具)、
    sidebar(侧栏/项目管理)、panel(仓库面板)、git-ops(Git 操作/AI)、
    history(历史)、run-panel(运行服务器)、dashboard(多仓库总览)。 */
-import { $, invoke, toast, DEFAULT_AI, settings, setSettings, setRepo, repo, applyTheme, DEFAULT_THEME, applyAccent, DEFAULT_ACCENT, ACCENTS } from "./js/state.js";
-import { loadRepos, fetchRemote, setupDragDrop, bindSidebarEvents, closeCtxMenu } from "./js/sidebar.js";
+import { $, invoke, listen, toast, DEFAULT_AI, settings, setSettings, setRepo, repo, applyTheme, DEFAULT_THEME, applyAccent, DEFAULT_ACCENT, ACCENTS } from "./js/state.js";
+import { loadRepos, fetchRemote, setupDragDrop, bindSidebarEvents, closeCtxMenu, addRepoByPath } from "./js/sidebar.js";
 import { refresh, showEmpty, bindPanelEvents, hideEditor } from "./js/panel.js";
 import { bindHistoryEvents } from "./js/history.js";
 import { bindGitEvents, initGitListeners } from "./js/git-ops.js";
 import { syncRunPanel, syncRunToggle, bindRunEvents, initRunListeners, refreshExternalStatus, closeRunCtxMenu, closeRunMoreMenu } from "./js/run-panel.js";
 import { bindDashboardEvents } from "./js/dashboard.js";
 import { bindUpdateEvents, startAutoUpdateCheck } from "./js/update.js";
+import { bindVersionEvents } from "./js/version.js";
 import { bindRepoFileWatcher } from "./js/file-watcher.js";
 import { applyUiScale } from "./js/ui-scale.js";
 import { initTooltip } from "./js/tooltip.js";
@@ -55,6 +56,7 @@ async function init() {
   bindDashboardEvents();
   bindDialogEvents();
   bindUpdateEvents();
+  bindVersionEvents();
   await bindRepoFileWatcher();
   bindGlobalDismiss();
   initTooltip(); // 自定义 tooltip:悬停立即显示,替代原生 title 延迟提示
@@ -62,6 +64,11 @@ async function init() {
   initGitListeners();
   initRunListeners();
   setupDragDrop();
+
+  // `gitty` 在已运行实例中再次调用时:后端已把目录写入配置,这里切换到对应项目
+  listen("gitty-open-repo", (event) => {
+    if (event.payload) addRepoByPath(event.payload);
+  }).catch(() => {});
 
   await loadRepos();
   if (repo) {

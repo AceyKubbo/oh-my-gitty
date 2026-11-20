@@ -923,6 +923,28 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 .settings-dialog .dlg-actions { padding: 12px 18px; border-top: 1px solid var(--border); flex: none; }
 .dlg-hint { font-size: 13px; color: var(--text-dim); }
+
+/* ===== 版本号升级弹窗 ===== */
+.vb-files {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 120px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+}
+.vb-file { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.vb-file code { color: var(--text-dim); word-break: break-all; }
+.vb-file-ver { color: var(--accent-bright); flex: none; }
+.vb-levels { display: flex; flex-direction: column; gap: 6px; }
+.vb-level {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: var(--text);
+}
+.vb-level:hover { background: var(--hover); }
+.vb-level:has(input:checked) { border-color: var(--accent); background: var(--accent-faint); }
+.vb-level input { accent-color: var(--accent); flex: none; }
+.vb-level-main { flex: 1; }
+.vb-level-note { color: var(--text-dim); font-size: 12px; margin-left: 8px; }
+.vb-example { color: var(--text-dim); flex: none; font-size: 12px; }
 /* 更新弹窗说明区:纯文本展示发布说明,超高滚动 */
 .update-notes {
   max-height: 220px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
