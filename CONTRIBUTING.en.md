@@ -32,21 +32,19 @@ npm run build  # native installer for the current OS: macOS .dmg / Windows NSIS 
 ## Code Style
 
 - The frontend is native HTML/CSS/JS (ES Modules); do not introduce a bundler.
-- The Rust backend follows the existing module layout (`git.rs` / `ai.rs` / `runner.rs` / `process.rs` / `config.rs` / `lib.rs`).
+- The Rust backend follows the existing module layout (`git.rs` / `ai.rs` / `runner.rs` / `process.rs` / `watcher.rs` / `cli.rs` / `version.rs` / `config.rs` / `lib.rs`).
 - Comments explain "why", not "what" or "how".
 
 ## Releasing (maintainers)
 
-Push a `v*` tag to trigger the Release workflow, which builds the macOS/Windows installers and generates the `latest.json` manifest used by in-app updates. Builds are signed with the updater private key stored in repository Secrets:
+**Automatic release on version bump**: update the `version` field in all three files — `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` (they must match) — and push to `main`. The `Version Bump` workflow detects the change and calls the `Release` workflow to build installers for all three platforms and publish them. Pushing a `v*` tag manually still works too.
 
-- `TAURI_SIGNING_PRIVATE_KEY`: full contents of `.tauri/updater.key` (the key never enters the repo; back it up — **if lost, already-released versions can no longer receive updates**)
+Builds are signed with the updater private key stored in repository Secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`: full contents of `.tauri/updater.key`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the key passphrase (this repo's key has none; set it to an empty string)
 
-The private key is also backed up in this machine's macOS Keychain (service `oh-my-gitty`, account `updater-signing-key`); if the `.tauri/` directory is ever lost, recover it with:
-
-```bash
-security find-generic-password -s oh-my-gitty -a updater-signing-key -w > .tauri/updater.key
-```
+The private key lives only in local `.tauri/updater.key` (gitignored) and in repository Secrets (write-only). Back up `.tauri/updater.key` somewhere safe, such as a password manager; **if it is lost you must generate a new key and update the pubkey in `tauri.conf.json`, and already-released versions will no longer pass update signature verification**.
 
 ## License
 

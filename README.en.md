@@ -5,6 +5,7 @@
 # Oh My Gitty 🐱
 
 [![Windows CI](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml/badge.svg)](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml)
+[![Version Bump](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/version-bump.yml/badge.svg)](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/version-bump.yml)
 [![Release](https://img.shields.io/github/v/release/AceyKubbo/oh-my-gitty)](https://github.com/AceyKubbo/oh-my-gitty/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -118,8 +119,11 @@ src-tauri/src/      Backend
   ai.rs             AI commit messages / conflict resolution
   runner.rs         Server process supervision / port probing
   process.rs        Cross-platform process spawning (suppresses console windows on Windows)
+  watcher.rs        Repository file watching / automatic status refresh
+  cli.rs            `gitty` terminal command setup and open-directory argument handling
+  version.rs        Version detection and bumping for managed projects
   config.rs         Settings persistence
-  lib.rs            Tauri commands
+  lib.rs            Tauri commands (including in-app updater plugin setup)
 ```
 
 ## Project Status

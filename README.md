@@ -5,6 +5,7 @@
 # Oh My Gitty 🐱
 
 [![Windows CI](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml/badge.svg)](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/windows.yml)
+[![Version Bump](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/version-bump.yml/badge.svg)](https://github.com/AceyKubbo/oh-my-gitty/actions/workflows/version-bump.yml)
 [![Release](https://img.shields.io/github/v/release/AceyKubbo/oh-my-gitty)](https://github.com/AceyKubbo/oh-my-gitty/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -118,8 +119,11 @@ src-tauri/src/      后端
   ai.rs             AI 提交信息 / 冲突解决
   runner.rs         服务器进程托管 / 端口探测
   process.rs        跨平台进程启动（Windows 下抑制控制台窗口）
+  watcher.rs        仓库文件监听 / 状态自动刷新
+  cli.rs            gitty 终端命令安装与打开目录参数处理
+  version.rs        被管理项目的版本号识别与升级
   config.rs         设置持久化
-  lib.rs            Tauri 命令
+  lib.rs            Tauri 命令（含应用内更新插件配置）
 ```
 
 ## 项目状态
