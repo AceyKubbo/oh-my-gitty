@@ -90,7 +90,7 @@ function commitRow(c, headHash) {
     li.appendChild(body);
   }
 
-  // 展开后加载此提交改动的文件清单(懒加载),点击文件即在右侧查看「该提交 vs 当前代码」
+  // 展开后加载此提交改动的文件清单(懒加载),点击文件即在右侧查看「此提交相对上一版本改了什么」
   const filesBox = document.createElement("div");
   filesBox.className = "commit-files-box hidden";
   li.appendChild(filesBox);
@@ -126,7 +126,7 @@ async function loadCommitFiles(hash, short, box) {
     for (const f of files) {
       const row = document.createElement("li");
       row.className = "commit-file";
-      row.title = f.path + " · 点击查看与当前代码的差异";
+      row.title = f.path + " · 点击查看此提交相对上一版本的改动";
 
       const st = document.createElement("span");
       st.className = "cf-status" + (f.status ? " s-" + f.status[0] : "");

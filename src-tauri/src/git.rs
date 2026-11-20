@@ -6,6 +6,9 @@ use crate::process::command;
 
 pub const MAX_AI_DIFF_BYTES: usize = 60_000;
 
+/// git 的空树对象:任何仓库中都存在,用作无父提交/无共同祖先时的对比基准
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 #[derive(Serialize, Clone, Default)]
 pub struct FileEntry {
     pub path: String,
@@ -812,7 +815,16 @@ pub fn reset_hard(repo: &str, hash: &str) -> Result<String, String> {
     run_git(repo, &["reset", "--hard", hash])
 }
 
-/// 某个提交改动的文件清单(相对其第一个父提交;根提交相对空树)。
+/// 某提交的「上一版本」参照:第一个父提交(合并提交只看第一父);
+/// 根提交无父,用 git 的空树对象代替(任何仓库中都存在),使新增文件也能正常对比。
+fn commit_parent_or_empty_tree(repo: &str, hash: &str) -> Result<String, String> {
+    let parents = run_git(repo, &["rev-list", "--parents", "-n", "1", hash])?;
+    let mut tokens = parents.split_whitespace();
+    let _ = tokens.next(); // 自身 hash
+    Ok(tokens.next().unwrap_or(EMPTY_TREE).to_string())
+}
+
+/// 某个提交改动的文件清单(相对上一版本)。
 /// status 为 A/M/D/T 等状态字母(--no-renames 下重命名拆成 A+D),
 /// added/deleted 为增删行数(二进制文件记为 0)。供版本历史展开后展示。
 #[derive(Serialize, Clone)]
@@ -824,23 +836,28 @@ pub struct CommitFile {
 }
 
 pub fn commit_files(repo: &str, hash: &str) -> Result<Vec<CommitFile>, String> {
-    // 比较基准:第一个父提交(合并提交只看第一父,语义=此提交引入的改动);
-    // 根提交无父,git diff-tree 需加 --root 才会输出全部文件为新增。
-    let parents = run_git(repo, &["rev-list", "--parents", "-n", "1", hash])?;
-    let mut tokens = parents.split_whitespace();
-    let _ = tokens.next(); // 自身 hash
-    let parent = tokens.next().map(|s| s.to_string());
-    let base: Vec<&str> = match parent.as_deref() {
-        Some(p) => vec![p, hash],
-        None => vec!["--root", hash],
-    };
+    let parent = commit_parent_or_empty_tree(repo, hash)?;
+    let base: Vec<&str> = vec![parent.as_str(), hash];
 
-    // name-status -z: <状态>\0<路径>\0 ... (无重命名时不存在双路径记录)
     let mut ns_args: Vec<&str> = vec![
         "diff-tree", "-r", "--no-commit-id", "--no-renames", "-z", "--name-status",
     ];
     ns_args.extend(base.iter().copied());
     let ns = run_git(repo, &ns_args)?;
+
+    let mut num_args: Vec<&str> = vec![
+        "diff-tree", "-r", "--no-commit-id", "--no-renames", "-z", "--numstat",
+    ];
+    num_args.extend(base.iter().copied());
+    let num = run_git(repo, &num_args)?;
+
+    Ok(parse_diff_files(&ns, &num))
+}
+
+/// 解析 diff 的 --name-status -z 与 --numstat -z 输出,合并成文件清单。
+/// name-status: <状态>\0<路径>\0 ...;numstat: <增>\t<删>\t<路径>\0 ...
+/// (-z 只把记录分隔符改成 NUL,记录内字段仍是 TAB;二进制文件增删记为 "-")
+fn parse_diff_files(ns: &str, num: &str) -> Vec<CommitFile> {
     let mut statuses: HashMap<String, String> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     let fields: Vec<&str> = ns.split('\0').collect();
@@ -855,27 +872,16 @@ pub fn commit_files(repo: &str, hash: &str) -> Result<Vec<CommitFile>, String> {
         i += 2;
     }
 
-    // numstat -z: 每条记录以 NUL 结尾,记录内字段用 TAB 分隔(<增>\t<删>\t<路径>\0),
-    // 二进制文件时增删为 "-"。注意 -z 只改记录分隔符,字段间仍是 TAB。
-    let mut num_args: Vec<&str> = vec![
-        "diff-tree", "-r", "--no-commit-id", "--no-renames", "-z", "--numstat",
-    ];
-    num_args.extend(base.iter().copied());
-    let num = run_git(repo, &num_args)?;
     let mut counts: HashMap<String, (i32, i32)> = HashMap::new();
     let to_n = |s: &str| if s == "-" { 0 } else { s.parse().unwrap_or(0) };
     for rec in num.split('\0') {
         let mut f = rec.splitn(3, '\t');
-        let parsed = match (f.next(), f.next(), f.next()) {
-            (Some(a), Some(d), Some(p)) => Some((unquote(p), (to_n(a), to_n(d)))),
-            _ => None,
-        };
-        if let Some((path, pair)) = parsed {
-            counts.insert(path, pair);
+        if let (Some(a), Some(d), Some(p)) = (f.next(), f.next(), f.next()) {
+            counts.insert(unquote(p), (to_n(a), to_n(d)));
         }
     }
 
-    Ok(order
+    order
         .into_iter()
         .map(|path| {
             let (added, deleted) = counts.get(&path).copied().unwrap_or((0, 0));
@@ -886,15 +892,24 @@ pub fn commit_files(repo: &str, hash: &str) -> Result<Vec<CommitFile>, String> {
                 deleted,
             }
         })
-        .collect())
+        .collect()
 }
 
-/// 某个提交的文件与「当前工作区代码」的差异。
-/// 减号行=该提交时的内容,加号行=现在的内容(git diff <commit> -- <path>)。
+/// 某个提交相对「上一版本」的差异:该文件在此提交中到底改了什么。
+/// 减号行=上一版本(父提交)的内容,加号行=此提交的内容。
 pub fn commit_file_diff(repo: &str, hash: &str, path: &str) -> Result<String, String> {
+    let parent = commit_parent_or_empty_tree(repo, hash)?;
     run_git(
         repo,
-        &["diff", "--no-color", "--no-ext-diff", hash, "--", path],
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            &parent,
+            hash,
+            "--",
+            path,
+        ],
     )
 }
 
@@ -934,6 +949,120 @@ pub fn checkout(repo: &str, branch: &str) -> Result<String, String> {
     }
 }
 
+/// 把指定分支(可为本地分支或 origin/xxx 远程跟踪分支)合并到当前分支。
+/// --no-edit 避免弹出编辑器;冲突时 git 返回错误,但冲突状态与 MERGE_HEAD 保留,
+/// 前端据 status.conflicts 决定是否复用 AI 冲突解决流程。
+pub fn merge(repo: &str, branch: &str) -> Result<String, String> {
+    run_git(repo, &["merge", "--no-edit", branch])
+}
+
+/// 挑拣某个提交到当前分支。冲突时 git 返回错误,CHERRY_PICK_HEAD 保留,
+/// 解决后由 continue_operation 续做,或 abort_operation 终止。
+pub fn cherry_pick(repo: &str, hash: &str) -> Result<String, String> {
+    run_git(repo, &["cherry-pick", hash])
+}
+
+/// 两个 ref 的对比结果:target 相对 base 的独有提交(可挑拣)、
+/// base 相对 target 的独有提交数,以及自共同祖先起 target 引入的文件改动。
+#[derive(Serialize, Clone)]
+pub struct CompareResult {
+    pub base: String,
+    pub target: String,
+    /// 在 target 上、不在 base 上的提交(新→旧),供逐条挑拣
+    pub incoming: Vec<CommitInfo>,
+    /// 在 base 上、不在 target 上的提交数(即"落后"数)
+    pub outgoing: usize,
+    pub files: Vec<CommitFile>,
+}
+
+pub fn compare(repo: &str, base: &str, target: &str) -> Result<CompareResult, String> {
+    let incoming = log_ref(repo, &format!("{base}..{target}"), 50);
+    let outgoing = run_git(repo, &["rev-list", "--count", &format!("{target}..{base}")])
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    // A...B 的语义 = A 与 B 的共同祖先 → B,正是"合并 B 会给 A 带来什么"的视角。
+    // 显式求 merge-base,使无共同祖先(无关历史)时退化为与空树比较而不是报错。
+    let mb = run_git(repo, &["merge-base", base, target])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| EMPTY_TREE.to_string());
+    let ns = run_git(repo, &["diff", "--name-status", "-z", "--no-renames", &mb, target])?;
+    let num = run_git(repo, &["diff", "--numstat", "-z", "--no-renames", &mb, target])?;
+    Ok(CompareResult {
+        base: base.to_string(),
+        target: target.to_string(),
+        incoming,
+        outgoing,
+        files: parse_diff_files(&ns, &num),
+    })
+}
+
+/// 对比视图中单个文件的差异(base...target 中该文件改了什么)
+pub fn compare_file_diff(repo: &str, base: &str, target: &str, path: &str) -> Result<String, String> {
+    let mb = run_git(repo, &["merge-base", base, target])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| EMPTY_TREE.to_string());
+    run_git(
+        repo,
+        &["diff", "--no-color", "--no-ext-diff", &mb, target, "--", path],
+    )
+}
+
+/// 解析仓库的 git 目录绝对路径(兼容 worktree 中 .git 为文件的情况)
+fn git_dir(repo: &str) -> Option<std::path::PathBuf> {
+    let gd = run_git(repo, &["rev-parse", "--git-dir"]).ok()?;
+    let p = std::path::Path::new(gd.trim());
+    Some(if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::path::Path::new(repo).join(p)
+    })
+}
+
+/// 当前进行中的 git 操作:none / merge / cherry-pick / revert
+pub fn operation_state(repo: &str) -> &'static str {
+    let Some(gd) = git_dir(repo) else {
+        return "none";
+    };
+    if gd.join("CHERRY_PICK_HEAD").exists() {
+        "cherry-pick"
+    } else if gd.join("REVERT_HEAD").exists() {
+        "revert"
+    } else if gd.join("MERGE_HEAD").exists() {
+        "merge"
+    } else {
+        "none"
+    }
+}
+
+/// 冲突已解决后继续未完成的 git 操作。merge 走提交(复用 finish_merge),
+/// cherry-pick/revert 走 --continue(-c core.editor=true 抑制编辑器)。
+/// 返回 (是否确有操作被继续, 输出)。
+pub fn continue_operation(repo: &str) -> Result<(bool, String), String> {
+    match operation_state(repo) {
+        "merge" => finish_merge(repo),
+        "cherry-pick" => Ok((
+            true,
+            run_git(repo, &["-c", "core.editor=true", "cherry-pick", "--continue"])?,
+        )),
+        "revert" => Ok((
+            true,
+            run_git(repo, &["-c", "core.editor=true", "revert", "--continue"])?,
+        )),
+        _ => Ok((false, String::new())),
+    }
+}
+
+/// 终止进行中的 git 操作(合并/挑拣/回退);无操作进行中返回 false。
+pub fn abort_operation(repo: &str) -> Result<bool, String> {
+    match operation_state(repo) {
+        "merge" => run_git(repo, &["merge", "--abort"]).map(|_| true),
+        "cherry-pick" => run_git(repo, &["cherry-pick", "--abort"]).map(|_| true),
+        "revert" => run_git(repo, &["revert", "--abort"]).map(|_| true),
+        _ => Ok(false),
+    }
+}
+
 /// 冲突文件清单
 pub fn conflict_files(repo: &str) -> Vec<String> {
     run_git(repo, &["diff", "--name-only", "--diff-filter=U"])
@@ -944,17 +1073,11 @@ pub fn conflict_files(repo: &str) -> Vec<String> {
 /// 检测是否处于合并中(MERGE_HEAD 存在),若是则用 git 准备的 MERGE_MSG 完成合并提交。
 /// 返回 (是否完成了合并, 提交输出);非合并状态返回 (false, "")。
 pub fn finish_merge(repo: &str) -> Result<(bool, String), String> {
-    let gd = run_git(repo, &["rev-parse", "--git-dir"])?;
-    let gd_path = std::path::Path::new(gd.trim());
-    let git_dir = if gd_path.is_absolute() {
-        gd_path.to_path_buf()
-    } else {
-        std::path::Path::new(repo).join(gd_path)
-    };
-    if !git_dir.join("MERGE_HEAD").exists() {
+    let gd = git_dir(repo).ok_or_else(|| "无法定位 git 目录".to_string())?;
+    if !gd.join("MERGE_HEAD").exists() {
         return Ok((false, String::new()));
     }
-    let msg = std::fs::read_to_string(git_dir.join("MERGE_MSG")).unwrap_or_default();
+    let msg = std::fs::read_to_string(gd.join("MERGE_MSG")).unwrap_or_default();
     let msg = if msg.trim().is_empty() {
         "Merge".into()
     } else {
@@ -1209,11 +1332,20 @@ mod tests {
         assert_eq!((a.added, a.deleted), (1, 1));
         assert_eq!((b.added, b.deleted), (1, 0));
 
-        // 工作区再次改动 b.txt:该提交版本 vs 当前代码的差异应同时含 -new/+changed
-        std::fs::write(repo.join("b.txt"), "changed\n").unwrap();
-        let d = commit_file_diff(r, &head.hash, "b.txt").unwrap();
-        assert!(d.contains("-new"), "应含该提交时的旧行: {d}");
-        assert!(d.contains("+changed"), "应含当前代码的新行: {d}");
+        // 差异=该提交相对上一版本改了什么:a.txt 的 v1→v2 应同时含 -v1/+v2
+        let d = commit_file_diff(r, &head.hash, "a.txt").unwrap();
+        assert!(d.contains("-v1"), "应含上一版本的旧行: {d}");
+        assert!(d.contains("+v2"), "应含此提交的新行: {d}");
+
+        // 新增文件 b.txt:相对上一版本只有新增行
+        let db = commit_file_diff(r, &head.hash, "b.txt").unwrap();
+        assert!(db.contains("+new"), "应含新增行: {db}");
+        assert!(!db.contains("-new"), "新增文件不应有删除行: {db}");
+
+        // 工作区后续改动不影响结果(对比基准是父提交,不是当前代码)
+        std::fs::write(repo.join("a.txt"), "worktree\n").unwrap();
+        let d2 = commit_file_diff(r, &head.hash, "a.txt").unwrap();
+        assert_eq!(d, d2, "差异不应随工作区改动变化");
 
         std::fs::remove_dir_all(repo).ok();
     }
@@ -1285,6 +1417,130 @@ mod tests {
         assert_eq!(cur.trim(), "dev");
         // 切到不存在的分支报错
         assert!(checkout(r, "nope").is_err());
+        std::fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn compare_branches_and_merge() {
+        let repo = temp_repo("compare-merge");
+        let r = repo.to_str().unwrap();
+        std::fs::write(repo.join("base.txt"), "base\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "init").unwrap();
+        let main = run_git(r, &["branch", "--show-current"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        run_git(r, &["checkout", "-q", "-b", "feature"]).unwrap();
+        std::fs::write(repo.join("base.txt"), "feature\n").unwrap();
+        std::fs::write(repo.join("new.txt"), "new\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "feature work").unwrap();
+        run_git(r, &["checkout", "-q", &main]).unwrap();
+
+        let cmp = compare(r, &main, "feature").unwrap();
+        assert_eq!(cmp.base, main);
+        assert_eq!(cmp.target, "feature");
+        assert_eq!(cmp.incoming.len(), 1, "feature 上有 1 个独有提交");
+        assert_eq!(cmp.incoming[0].subject, "feature work");
+        assert_eq!(cmp.outgoing, 0);
+        let paths: Vec<&str> = cmp.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"base.txt") && paths.contains(&"new.txt"));
+        // 单个文件差异来自共同祖先 → target
+        let d = compare_file_diff(r, &main, "feature", "base.txt").unwrap();
+        assert!(d.contains("+feature") && d.contains("-base"));
+
+        merge(r, "feature").unwrap();
+        assert_eq!(operation_state(r), "none");
+        assert_eq!(std::fs::read_to_string(repo.join("base.txt")).unwrap(), "feature\n");
+        assert!(repo.join("new.txt").exists());
+        // 合并后 feature 的独有提交已并入当前分支
+        assert_eq!(compare(r, &main, "feature").unwrap().incoming.len(), 0);
+        std::fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn cherry_pick_apply_and_conflict() {
+        let repo = temp_repo("cherry-pick");
+        let r = repo.to_str().unwrap();
+        std::fs::write(repo.join("f.txt"), "line1\nline2\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "base").unwrap();
+
+        // feature 新增文件,挑拣应干净应用
+        run_git(r, &["checkout", "-q", "-b", "feature"]).unwrap();
+        std::fs::write(repo.join("added.txt"), "added\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "add file").unwrap();
+        let picked = log(r, 1)[0].hash.clone();
+        run_git(r, &["checkout", "-q", "-"]).unwrap();
+        cherry_pick(r, &picked).unwrap();
+        assert!(repo.join("added.txt").exists());
+        assert_eq!(operation_state(r), "none");
+
+        // 制造冲突:双方改同一行,挑拣应停下并保留 CHERRY_PICK_HEAD
+        run_git(r, &["checkout", "-q", "-b", "conflict"]).unwrap();
+        std::fs::write(repo.join("f.txt"), "line1\nfrom-conflict\nline2\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "conflict change").unwrap();
+        let conflict_hash = log(r, 1)[0].hash.clone();
+        run_git(r, &["checkout", "-q", "-"]).unwrap();
+        std::fs::write(repo.join("f.txt"), "line1\nfrom-main\nline2\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "main change").unwrap();
+        assert!(cherry_pick(r, &conflict_hash).is_err(), "应产生冲突");
+        assert_eq!(operation_state(r), "cherry-pick");
+        assert!(conflict_files(r).contains(&"f.txt".to_string()));
+
+        // 解决并继续:挑拣提交应落到 HEAD,操作状态清空
+        std::fs::write(repo.join("f.txt"), "line1\nresolved\nline2\n").unwrap();
+        stage_all(r).unwrap();
+        let (continued, _) = continue_operation(r).unwrap();
+        assert!(continued);
+        assert_eq!(operation_state(r), "none");
+        assert_eq!(log(r, 1)[0].subject, "conflict change");
+        assert!(conflict_files(r).is_empty());
+        std::fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn merge_conflict_continue_and_abort() {
+        let repo = temp_repo("merge-conflict-flow");
+        let r = repo.to_str().unwrap();
+        std::fs::write(repo.join("f.txt"), "v0\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "base").unwrap();
+        let main = run_git(r, &["branch", "--show-current"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        run_git(r, &["checkout", "-q", "-b", "topic"]).unwrap();
+        std::fs::write(repo.join("f.txt"), "topic\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "topic").unwrap();
+        run_git(r, &["checkout", "-q", &main]).unwrap();
+        std::fs::write(repo.join("f.txt"), "main\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "main").unwrap();
+
+        // 先验证终止:冲突后 abort 应回到合并前,HEAD 不变
+        let before = head_hash(r);
+        assert!(merge(r, "topic").is_err());
+        assert_eq!(operation_state(r), "merge");
+        assert!(abort_operation(r).unwrap());
+        assert_eq!(operation_state(r), "none");
+        assert_eq!(head_hash(r), before);
+
+        // 再验证解决后继续
+        assert!(merge(r, "topic").is_err());
+        std::fs::write(repo.join("f.txt"), "merged\n").unwrap();
+        stage_all(r).unwrap();
+        let (continued, _) = continue_operation(r).unwrap();
+        assert!(continued);
+        assert_eq!(operation_state(r), "none");
+        assert!(log(r, 1)[0].subject.starts_with("Merge"));
         std::fs::remove_dir_all(repo).ok();
     }
 }

@@ -37,8 +37,8 @@ So I built Oh My Gitty: a lightweight, standalone companion focused on Git manag
 | AI integrations | OpenAI-compatible APIs plus local CLIs including Claude Code, Codex CLI, Gemini CLI, Qwen Code, Ollama, Crush, and OpenCode |
 | Push / Pull | Handles branches without an upstream automatically; silent background fetch keeps status fresh |
 | AI conflict resolution | Conflict files are merged by AI (> 80 KB requires manual handling), then automatically `git add`-ed with the merge completed |
-| History timeline | Combined local + remote commits; expand a commit to see its changed files, click a file to view its diff against the current code in the right-hand panel (or switch to the file content at that revision); reset to any historical version with a confirmation dialog |
-| Branches | Switch branches; remote branches automatically get local tracking branches |
+| History timeline | Combined local + remote commits; expand a commit to see its changed files, click a file to view what that commit changed relative to its previous version in the right-hand panel (or switch to the file content at that revision); reset to any historical version with a confirmation dialog |
+| Branches | Switch branches; remote branches automatically get local tracking branches; merge or compare any branch from the branch menu; compare view shows incoming commits and changed files with per-file diffs, plus cherry-pick per commit; merge/cherry-pick conflicts support AI or manual resolution with continue/abort |
 | Run panel | Scans and detects launch commands and ports (npm/django/make/cargo/go…), start/stop inside the app, line-by-line logs, external-run detection and safe shutdown |
 | In-app updates | Checks for new versions on startup (or manually in Settings → About & Update); download and install in one step, with signature verification |
 | Window | Always-on-top toggle to stay visible while coding; closing hides to the system tray |

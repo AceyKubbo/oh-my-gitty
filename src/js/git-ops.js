@@ -1,8 +1,12 @@
 /* Git 操作:暂存/丢弃/提交(AI 流式弹窗)/推送/拉取/GitHub 授权/AI 冲突解决/
-   窗口置顶/分支切换 */
-import { $, invoke, listen, toast, setBusy, setButtonLoading, runBusy, settings, repo, setLastShipStatus } from "./state.js";
+   窗口置顶/分支切换/合并/对比/挑拣 */
+import { $, invoke, listen, toast, setBusy, setButtonLoading, runBusy, settings, repo, setLastShipStatus, relTimeShort } from "./state.js";
 import { refresh, refreshShipButtons } from "./panel.js";
 import { refreshTip } from "./tooltip.js";
+
+// 把外部文本(分支名/提交信息/路径)插入 innerHTML 前统一转义
+const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /* ===== 暂存 / 丢弃 ===== */
 export async function stageAll(stage) {
@@ -304,10 +308,20 @@ async function submitGithubToken() {
 async function checkConflictsAfterPull() {
   if (!repo) return;
   const st = await invoke("git_status", { repo });
-  if (st.conflicts.length > 0) {
-    $("merge-conflict-count").textContent = st.conflicts.length;
-    $("dlg-merge-conflict").classList.remove("hidden");
-  }
+  if (st.conflicts.length > 0) showConflictDialog("merge", st.conflicts.length);
+}
+
+/* ===== 冲突处理(拉取/合并/挑拣共用) ===== */
+// 当前冲突所属的操作类型,决定 AI 解决后调用哪种"继续"逻辑
+let conflictOp = "merge";
+const OP_LABELS = { merge: "合并", "cherry-pick": "挑拣", revert: "回退" };
+
+function showConflictDialog(op, count) {
+  conflictOp = op;
+  const label = OP_LABELS[op] || "合并";
+  $("merge-conflict-title").innerHTML = `${label}产生 <span id="merge-conflict-count">${count}</span> 个冲突`;
+  $("btn-merge-ai").textContent = `AI 自动解决并${label === "挑拣" ? "继续挑拣" : label === "回退" ? "继续回退" : "完成合并"}`;
+  $("dlg-merge-conflict").classList.remove("hidden");
 }
 
 /* ===== AI 冲突解决 ===== */
@@ -324,16 +338,16 @@ async function resolveAllConflicts() {
     const failN = results.length - okN;
     let mergedNote = "";
     if (failN === 0) {
-      // 全部解决后,若处于合并中则自动完成合并提交
+      // 全部解决后继续未完成的 git 操作(合并提交 / cherry-pick --continue)
       try {
-        const mr = await invoke("git_finish_merge", { repo });
-        if (mr && mr.merged) mergedNote = " 已自动完成合并提交";
-      } catch (_) { /* 非合并状态或提交失败,保持已暂存状态 */ }
+        const mr = await invoke("git_continue", { repo });
+        if (mr && mr.continued) mergedNote = " 已自动完成" + (OP_LABELS[conflictOp] || "操作");
+      } catch (_) { /* 非进行中状态或提交失败,保持已暂存状态由用户手动继续 */ }
     }
     $("conflict-detail").textContent = failN
       ? `成功 ${okN} 个，失败 ${failN} 个：` + results.filter((r) => !r.ok).map((r) => `\n• ${r.path}： ${r.error}`).join("")
       : `全部 ${okN} 个冲突已由 AI 解决，文件已暂存${mergedNote}。`;
-    toast(failN ? `解决 ${okN} 个，${failN} 个失败` : (mergedNote ? "冲突已解决并完成合并" : "冲突已解决"), failN === 0);
+    toast(failN ? `解决 ${okN} 个，${failN} 个失败` : (mergedNote ? ("冲突已解决，" + mergedNote.trim()) : "冲突已解决"), failN === 0);
   } catch (e) {
     $("conflict-detail").textContent = String(e);
     toast(String(e), false);
@@ -390,8 +404,10 @@ function renderBranchGroups(box, b) {
       return g;
     }
     for (const name of items) {
-      const item = document.createElement("button");
+      const item = document.createElement("div");
       item.className = "branch-item" + (name === b.current ? " current" : "");
+      const main = document.createElement("button");
+      main.className = "branch-main";
       const mark = document.createElement("span");
       mark.className = "branch-mark";
       if (name === b.current) {
@@ -402,8 +418,26 @@ function renderBranchGroups(box, b) {
       const label = document.createElement("span");
       label.className = "branch-label";
       label.textContent = isRemote ? name.replace(/^origin\//, "") : name;
-      item.append(mark, label);
-      item.addEventListener("click", () => switchBranch(name));
+      main.append(mark, label);
+      main.addEventListener("click", () => switchBranch(name));
+      item.appendChild(main);
+      // 当前分支不提供合并/对比(合并自己无意义;对比自己恒为空)
+      if (name !== b.current) {
+        const acts = document.createElement("span");
+        acts.className = "branch-actions";
+        const mk = (text, fn) => {
+          const x = document.createElement("button");
+          x.className = "branch-action";
+          x.textContent = text;
+          x.addEventListener("click", (ev) => { ev.stopPropagation(); fn(); });
+          return x;
+        };
+        acts.append(
+          mk("合并", () => askBranchOp("merge", name)),
+          mk("对比", () => openCompare(name)),
+        );
+        item.appendChild(acts);
+      }
       g.appendChild(item);
     }
     return g;
@@ -452,6 +486,192 @@ async function switchBranch(name) {
   if (ok) toast("已切换到 " + name, true);
 }
 
+/* ===== 合并 / 挑拣 ===== */
+let pendingOp = null; // { type: "merge"|"cherry-pick", ref, hash }
+
+// 合并/挑拣共用的确认框。ref 为展示用(分支名或提交信息),hash 为挑拣目标。
+function askBranchOp(type, ref, hash) {
+  if (!repo) { toast("请先打开项目", false); return; }
+  $("branch-menu").classList.add("hidden");
+  pendingOp = { type, ref, hash };
+  if (type === "merge") {
+    $("branch-op-title").textContent = "合并分支";
+    $("branch-op-hint").innerHTML = `将把 <span class="mono">${esc(ref)}</span> 的改动合并到当前分支。若有冲突，可在冲突对话框中选择 AI 解决或手动处理。`;
+    $("btn-branch-op-confirm").textContent = "合并";
+  } else {
+    $("branch-op-title").textContent = "挑拣提交";
+    $("branch-op-hint").innerHTML = `将把提交 <span class="mono">${esc(hash)}</span>（${esc(ref)}）的改动应用到当前分支。若有冲突，可在冲突对话框中选择 AI 解决或手动处理。`;
+    $("btn-branch-op-confirm").textContent = "挑拣";
+  }
+  $("dlg-branch-op").classList.remove("hidden");
+}
+
+async function confirmBranchOp() {
+  const op = pendingOp;
+  pendingOp = null;
+  $("dlg-branch-op").classList.add("hidden");
+  if (!op || !repo) return;
+  if (op.type === "merge") {
+    await runBranchOp("git_merge", { repo, branch: op.ref }, "合并中…", `已合并 ${op.ref}`, "merge");
+  } else {
+    await runBranchOp("git_cherry_pick", { repo, hash: op.hash }, "挑拣中…", `已挑拣 ${op.hash}`, "cherry-pick");
+  }
+}
+
+// 执行合并/挑拣:冲突时弹出冲突决策框(由 AI 或用户手动解决),成功则提示并刷新。
+async function runBranchOp(cmd, args, busyText, okText, op) {
+  $("branch-menu").classList.add("hidden");
+  setBusy(true, busyText);
+  let r = null;
+  try { r = await invoke(cmd, args); }
+  catch (e) { toast(String(e), false); }
+  finally { setBusy(false); }
+  const st = await invoke("git_status", { repo }).catch(() => null);
+  if (st && st.conflicts.length > 0) {
+    showConflictDialog(op, st.conflicts.length);
+    await refresh();
+    return;
+  }
+  if (r && r.ok === false) toast(r.output, false);
+  else toast(okText, true);
+  await refresh();
+}
+
+/* ===== 进行中操作提示条:冲突后仍可继续或终止 ===== */
+export function syncOpBanner(operation, conflicts) {
+  const bar = $("op-banner");
+  if (!bar) return;
+  const op = operation || "none";
+  bar.classList.toggle("hidden", op === "none");
+  if (op === "none") return;
+  const label = OP_LABELS[op] || op;
+  $("op-banner-text").textContent = conflicts > 0
+    ? `${label}进行中 · ${conflicts} 个冲突待解决，解决并暂存后点「继续」`
+    : `${label}进行中`;
+}
+
+async function continueOperation() {
+  setBusy(true, "继续中…");
+  try {
+    const r = await invoke("git_continue", { repo });
+    if (r && r.continued) toast("操作已完成", true);
+    else toast("当前没有进行中的操作", false);
+  } catch (e) {
+    toast(String(e), false);
+  } finally {
+    setBusy(false);
+  }
+  await refresh();
+}
+
+async function abortOperation() {
+  $("dlg-merge-conflict").classList.add("hidden");
+  setBusy(true, "终止中…");
+  try {
+    const r = await invoke("git_abort", { repo });
+    if (r && r.ok === false) toast(r.output, false);
+    else toast("已终止当前操作", true);
+  } catch (e) {
+    toast(String(e), false);
+  } finally {
+    setBusy(false);
+  }
+  await refresh();
+}
+
+/* ===== 分支对比 ===== */
+let compareCtx = null; // { repoPath, base, target, data }
+
+// 渲染 diff 文本(复用右侧代码区的 d-row 配色),滤掉 git 元信息行
+function renderCompareDiff(text) {
+  return String(text).split("\n").map((line) => {
+    if (line.startsWith("diff --git ") || line.startsWith("index ")
+      || line.startsWith("---") || line.startsWith("+++") || line.startsWith("@@")) return "";
+    let cls = "d-ctx", sign = " ", body = line;
+    if (line.startsWith("+")) { cls = "d-add"; sign = "+"; body = line.slice(1); }
+    else if (line.startsWith("-")) { cls = "d-del"; sign = "-"; body = line.slice(1); }
+    return `<div class="d-row ${cls}"><span class="d-gutter">${sign}</span><span class="d-text">${esc(body)}</span></div>`;
+  }).join("");
+}
+
+function setCompareTab(tab) {
+  document.querySelectorAll(".compare-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+  $("compare-commits").classList.toggle("hidden", tab !== "commits");
+  $("compare-files").classList.toggle("hidden", tab !== "files");
+}
+
+function renderCompare(data) {
+  const cmBox = $("compare-commits");
+  if (!data.incoming.length) {
+    cmBox.innerHTML = '<div class="compare-empty">目标分支没有当前分支缺少的提交</div>';
+  } else {
+    cmBox.innerHTML = data.incoming.map((c) => `
+      <div class="compare-commit">
+        <span class="cc-hash">${esc(c.short)}</span>
+        <span class="cc-subject" title="${esc(c.subject)}">${esc(c.subject)}</span>
+        <span class="cc-author">${esc(c.author)} · ${esc(relTimeShort(c.timestamp))}</span>
+        <button class="cc-pick" data-hash="${esc(c.hash)}" data-subject="${esc(c.subject)}">挑拣</button>
+      </div>`).join("");
+    cmBox.querySelectorAll(".cc-pick").forEach((btn) => {
+      btn.addEventListener("click", () => askBranchOp("cherry-pick", btn.dataset.subject || "选中提交", btn.dataset.hash));
+    });
+  }
+  const fileBox = $("compare-files");
+  if (!data.files.length) {
+    fileBox.innerHTML = '<div class="compare-empty">两个分支之间没有文件差异</div>';
+  } else {
+    fileBox.innerHTML = data.files.map((f) => `
+      <div class="compare-file" data-path="${esc(f.path)}">
+        <div class="compare-file-main">
+          <span class="cf-status${f.status ? " s-" + esc(f.status[0]) : ""}">${esc(f.status || "M")}</span>
+          <span class="cf-name" title="${esc(f.path)}">${esc(f.path)}</span>
+          <span class="cf-lines">${f.added > 0 ? `<span class="cf-add">+${f.added}</span>` : ""}${f.deleted > 0 ? `<span class="cf-del">-${f.deleted}</span>` : ""}</span>
+        </div>
+        <div class="compare-diff hidden"></div>
+      </div>`).join("");
+    fileBox.querySelectorAll(".compare-file-main").forEach((main) => {
+      main.addEventListener("click", () => toggleCompareFileDiff(main.parentElement));
+    });
+  }
+  $("compare-commit-count").textContent = data.incoming.length;
+  $("compare-file-count").textContent = data.files.length;
+}
+
+function toggleCompareFileDiff(row) {
+  const diff = row.querySelector(".compare-diff");
+  if (!diff.classList.contains("hidden")) {
+    diff.classList.add("hidden");
+    diff.innerHTML = "";
+    return;
+  }
+  diff.classList.remove("hidden");
+  diff.innerHTML = '<span class="d-load">加载中…</span>';
+  const ctx = compareCtx;
+  invoke("git_compare_file_diff", { repo: ctx.repoPath, base: ctx.base, target: ctx.target, path: row.dataset.path })
+    .then((text) => { diff.innerHTML = text ? renderCompareDiff(text) : '<div class="compare-empty">无差异内容</div>'; })
+    .catch((e) => { diff.innerHTML = `<div class="compare-empty">${esc(String(e))}</div>`; });
+}
+
+async function openCompare(target) {
+  if (!repo) return;
+  $("branch-menu").classList.add("hidden");
+  const repoPath = repo;
+  const cached = branchCache && branchCache.repo === repo ? branchCache.data : null;
+  const b = cached || await invoke("git_branches", { repo }).catch(() => null);
+  const base = b && b.current;
+  if (!base) { toast("当前处于分离 HEAD，无法对比", false); return; }
+  setBusy(true, "加载分支对比…");
+  let data = null;
+  try { data = await invoke("git_compare", { repo, base, target }); }
+  catch (e) { toast(String(e), false); return; }
+  finally { setBusy(false); }
+  compareCtx = { repoPath, base, target, data };
+  $("compare-summary").textContent = `${base} 领先 ${data.outgoing} 个提交 · 落后 ${data.incoming.length} 个提交（来自 ${target}）`;
+  renderCompare(data);
+  setCompareTab("commits");
+  $("dlg-compare").classList.remove("hidden");
+}
+
 /* ===== 事件绑定 ===== */
 export function bindGitEvents() {
   $("btn-commit").addEventListener("click", () => onCommit());
@@ -487,7 +707,28 @@ export function bindGitEvents() {
     resolveAllConflicts();
   });
   $("btn-merge-manual").addEventListener("click", () => $("dlg-merge-conflict").classList.add("hidden"));
+  $("btn-conflict-abort").addEventListener("click", abortOperation);
   $("btn-conflict-done").addEventListener("click", () => $("dlg-conflict").classList.add("hidden"));
+  // 分支操作确认(合并/挑拣)
+  $("btn-branch-op-cancel").addEventListener("click", () => {
+    pendingOp = null;
+    $("dlg-branch-op").classList.add("hidden");
+  });
+  $("btn-branch-op-confirm").addEventListener("click", confirmBranchOp);
+  // 进行中操作提示条
+  $("btn-op-continue").addEventListener("click", continueOperation);
+  $("btn-op-abort").addEventListener("click", abortOperation);
+  // 分支对比弹窗
+  $("btn-compare-close").addEventListener("click", () => $("dlg-compare").classList.add("hidden"));
+  $("btn-compare-cancel").addEventListener("click", () => $("dlg-compare").classList.add("hidden"));
+  $("btn-compare-merge").addEventListener("click", () => {
+    const target = compareCtx && compareCtx.target;
+    $("dlg-compare").classList.add("hidden");
+    if (target) askBranchOp("merge", target);
+  });
+  document.querySelectorAll(".compare-tab").forEach((t) => {
+    t.addEventListener("click", () => setCompareTab(t.dataset.tab));
+  });
 }
 
 /* ===== 后端事件监听 ===== */

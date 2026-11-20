@@ -939,7 +939,7 @@ async fn git_commit_files(repo: String, hash: String) -> Result<Vec<git::CommitF
         .map_err(|e| e.to_string())?
 }
 
-/// 某个提交的文件与当前工作区代码的差异,供右侧代码区联动展示。
+/// 某个提交相对上一版本(父提交)的差异 —— 该文件在此提交中改了什么,供右侧代码区联动展示。
 #[tauri::command]
 async fn git_commit_file_diff(repo: String, hash: String, path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || git::commit_file_diff(&repo, &hash, &path))
@@ -1117,6 +1117,8 @@ async fn git_history(repo: String) -> History {
 struct RefreshResult {
     status: git::RepoStatus,
     history: History,
+    /// 进行中的 git 操作(合并/挑拣/回退),供前端展示「继续/终止」提示条
+    operation: String,
 }
 
 /// 合并 status + history 的单次刷新命令:1 次 status 即拿到 branch/upstream/ahead/behind/head,
@@ -1134,6 +1136,7 @@ async fn git_refresh(repo: String) -> RefreshResult {
         return RefreshResult {
             status: st,
             history: History::default(),
+            operation: "none".into(),
         };
     }
 
@@ -1183,6 +1186,7 @@ async fn git_refresh(repo: String) -> RefreshResult {
             commits,
             remote,
         },
+        operation: git::operation_state(&repo).to_string(),
     }
 }
 
@@ -1228,6 +1232,91 @@ async fn git_checkout(repo: String, branch: String) -> OpResult {
         tauri::async_runtime::spawn_blocking(move || git::checkout(&repo, &branch))
             .await
             .unwrap_or_else(|e| Err(e.to_string())),
+    )
+}
+
+/// 合并分支到当前分支。冲突时返回 ok:false 并保留冲突状态,前端据此弹出冲突处理对话框。
+#[tauri::command]
+async fn git_merge(repo: String, branch: String) -> OpResult {
+    op(
+        tauri::async_runtime::spawn_blocking(move || git::merge(&repo, &branch))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string())),
+    )
+}
+
+/// 挑拣提交到当前分支。冲突处理同 git_merge。
+#[tauri::command]
+async fn git_cherry_pick(repo: String, hash: String) -> OpResult {
+    op(
+        tauri::async_runtime::spawn_blocking(move || git::cherry_pick(&repo, &hash))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string())),
+    )
+}
+
+/// 两分支对比:传入提交、落后提交数、改动文件清单
+#[tauri::command]
+async fn git_compare(repo: String, base: String, target: String) -> Result<git::CompareResult, String> {
+    tauri::async_runtime::spawn_blocking(move || git::compare(&repo, &base, &target))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// 对比视图中单个文件的差异
+#[tauri::command]
+async fn git_compare_file_diff(
+    repo: String,
+    base: String,
+    target: String,
+    path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::compare_file_diff(&repo, &base, &target, &path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 当前进行中的 git 操作:none / merge / cherry-pick / revert
+#[tauri::command]
+async fn git_operation(repo: String) -> String {
+    tauri::async_runtime::spawn_blocking(move || git::operation_state(&repo).to_string())
+        .await
+        .unwrap_or_else(|_| "none".into())
+}
+
+#[derive(Serialize)]
+struct ContinueResult {
+    continued: bool,
+    message: String,
+}
+
+/// 冲突解决后继续未完成的合并/挑拣/回退
+#[tauri::command]
+async fn git_continue(repo: String) -> Result<ContinueResult, String> {
+    let (continued, message) =
+        tauri::async_runtime::spawn_blocking(move || git::continue_operation(&repo))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))?;
+    Ok(ContinueResult { continued, message })
+}
+
+/// 终止进行中的合并/挑拣/回退
+#[tauri::command]
+async fn git_abort(repo: String) -> OpResult {
+    op(
+        tauri::async_runtime::spawn_blocking(move || {
+            git::abort_operation(&repo).and_then(|aborted| {
+                if aborted {
+                    Ok("已终止当前操作".to_string())
+                } else {
+                    Err("当前没有进行中的操作".to_string())
+                }
+            })
+        })
+        .await
+        .unwrap_or_else(|e| Err(e.to_string())),
     )
 }
 
@@ -1892,6 +1981,13 @@ pub fn run() {
             git_reset_hard,
             git_branches,
             git_checkout,
+            git_merge,
+            git_cherry_pick,
+            git_compare,
+            git_compare_file_diff,
+            git_operation,
+            git_continue,
+            git_abort,
             ai_commit_message,
             ai_commit_message_stream,
             ai_test_config,

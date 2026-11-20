@@ -3,7 +3,7 @@
 import { $, invoke, toast, setButtonLoading, STATUS_CHARS, repo, view, repos, settings, lastShipStatus, setLastShipStatus, setNumBadge } from "./state.js";
 import { updateProjectHeader, renderRepoList, removeRepo } from "./sidebar.js";
 import { renderHistory } from "./history.js";
-import { toggleStage, stagePaths, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache } from "./git-ops.js";
+import { toggleStage, stagePaths, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache, syncOpBanner } from "./git-ops.js";
 
 const sectionUserSet = new Set(); // 用户手动切换过的分组:自动收起规则不再覆盖其状态
 
@@ -20,6 +20,8 @@ export async function refresh() {
   // 总览/切换项目期间,旧请求返回的数据不能重新显示项目级工具栏和面板
   if (view !== "repo" || repo !== targetRepo) return;
   const st = data.status, hist = data.history;
+  // 进行中的合并/挑拣/回退:常驻提示条(冲突解决后可继续或终止)
+  syncOpBanner(data.operation, st.conflicts.length);
   // 就地同步侧栏摘要:角标(未暂存+未跟踪+冲突)/领先落后数/最近提交时间随面板操作即时更新,
   // 不必等全量重扫(暂存一批更改后左侧数字立刻变化);字段口径与后端 summarize 一致
   const sum = repos.find((r) => r.path === targetRepo);
@@ -528,8 +530,8 @@ function openEditor(e, kind) {
   setEditorTab(editorTab);
 }
 
-// 从版本历史打开某个提交改动的文件:右侧差异页展示「该提交 vs 当前代码」。
-// 由 history.js 在展开提交的文件清单后调用。
+// 从版本历史打开某个提交改动的文件:右侧差异页展示「该提交 vs 上一版本」,
+// 即这个提交里到底改了什么。由 history.js 在展开提交的文件清单后调用。
 export function openCommitFile(hash, short, file) {
   diffRepo = repo;
   editorCommit = { hash, short };
@@ -537,9 +539,9 @@ export function openCommitFile(hash, short, file) {
   editorKind = "commit";
   if (editorTab === "merge") editorTab = "diff"; // 合并页只对冲突开放
   $("diff-title").textContent = file.path;
-  $("diff-title").title = `${short} · ${file.path} · 与当前代码对比`;
+  $("diff-title").title = `${short} · ${file.path} · 与上一版本的差异`;
   const ctx = $("diff-context");
-  ctx.textContent = `对比 ${short} → 当前`;
+  ctx.textContent = `对比 上一版 → ${short}`;
   ctx.classList.remove("hidden");
   document.querySelector('.editor-tab[data-tab="merge"]').classList.add("hidden");
   setEditorVisible(true);
@@ -563,9 +565,9 @@ async function loadEditorContent() {
     let html;
     if (tab === "diff") {
       if (cm) {
-        // 版本历史联动:该提交的文件 vs 当前工作区代码
+        // 版本历史联动:该文件在此提交中相对上一版本的改动
         const diff = await invoke("git_commit_file_diff", { repo: targetRepo, hash: cm.hash, path: e.path });
-        html = diff ? renderDiff(diff) : '<span class="d-empty">该提交与当前代码无差异</span>';
+        html = diff ? renderDiff(diff) : '<span class="d-empty">该提交未改动此文件</span>';
       } else {
         const diff = await invoke("git_diff", { repo: targetRepo, path: e.path, staged: kind === "staged" });
         html = diff ? renderDiff(diff) : '<span class="d-empty">无差异内容</span>';

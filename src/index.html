@@ -155,6 +155,14 @@
         </button>
       </section>
 
+      <!-- 合并/挑拣/回退进行中提示条:冲突被"稍后手动处理"后仍可从这里继续或终止 -->
+      <div id="op-banner" class="op-banner hidden">
+        <span class="op-banner-dot"></span>
+        <span id="op-banner-text">操作进行中</span>
+        <button id="btn-op-continue" class="tool-btn">继续</button>
+        <button id="btn-op-abort" class="tool-btn">终止</button>
+      </div>
+
       <!-- 主区行:左侧仓库面板 + 右侧 diff 面板(点击文件在右侧展示差异,不遮挡操作区) -->
       <div id="main-row">
       <div id="main">
@@ -358,15 +366,55 @@
     </div>
   </div>
 
-  <!-- 拉取冲突决策 -->
+  <!-- 冲突决策(拉取/合并/挑拣共用) -->
   <div class="overlay hidden" id="dlg-merge-conflict">
     <div class="dialog">
-      <h3>拉取产生 <span id="merge-conflict-count">0</span> 个冲突</h3>
-      <p class="dlg-hint">可以让 AI 自动解决冲突并完成合并提交，也可以稍后手动处理。</p>
+      <h3 id="merge-conflict-title">合并产生 <span id="merge-conflict-count">0</span> 个冲突</h3>
+      <p class="dlg-hint">可以让 AI 自动解决冲突并继续操作，也可以稍后手动处理。手动解决并暂存文件后，用工具栏下方的「继续」完成操作。</p>
       <div class="dlg-actions">
         <button class="tool-btn" id="btn-merge-manual">稍后手动处理</button>
         <span class="spacer"></span>
+        <button class="tool-btn" id="btn-conflict-abort">终止操作</button>
         <button class="tool-btn primary" id="btn-merge-ai">AI 自动解决并合并</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分支操作确认(合并 / 挑拣共用) -->
+  <div class="overlay hidden" id="dlg-branch-op">
+    <div class="dialog">
+      <h3 id="branch-op-title">合并分支</h3>
+      <p class="dlg-hint" id="branch-op-hint"></p>
+      <div class="dlg-actions">
+        <button class="tool-btn" id="btn-branch-op-cancel">取消</button>
+        <span class="spacer"></span>
+        <button class="tool-btn primary" id="btn-branch-op-confirm">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分支对比 -->
+  <div class="overlay hidden" id="dlg-compare">
+    <div class="dialog compare-dialog">
+      <div class="compare-head">
+        <div>
+          <h3>分支对比</h3>
+          <p class="dlg-hint" id="compare-summary"></p>
+        </div>
+        <button class="icon-btn" id="btn-compare-close" title="关闭" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="compare-tabs">
+        <button class="compare-tab active" data-tab="commits">传入提交 <span id="compare-commit-count">0</span></button>
+        <button class="compare-tab" data-tab="files">改动文件 <span id="compare-file-count">0</span></button>
+      </div>
+      <div class="compare-pane" id="compare-commits"></div>
+      <div class="compare-pane hidden" id="compare-files"></div>
+      <div class="dlg-actions">
+        <button class="tool-btn" id="btn-compare-merge">合并到当前分支</button>
+        <span class="spacer"></span>
+        <button class="tool-btn" id="btn-compare-cancel">关闭</button>
       </div>
     </div>
   </div>

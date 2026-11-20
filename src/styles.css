@@ -451,10 +451,35 @@ select option { background: var(--input-bg); color: var(--text); }
 .branch-menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 50;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
-  min-width: 220px; max-width: 340px; max-height: 340px; overflow-y: auto;
+  min-width: 260px; max-width: 380px; max-height: 340px; overflow-y: auto;
   padding: 6px; box-shadow: 0 4px 16px var(--shadow);
   display: flex; flex-direction: column; gap: 8px;
 }
+/* 分支行:左侧切换(占满剩余空间)+ 右侧操作按钮(合并/对比) */
+.branch-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  padding: 0; border: none; background: transparent; color: inherit;
+  font-size: inherit; text-align: left; cursor: pointer;
+}
+.branch-actions { display: inline-flex; gap: 4px; flex: none; }
+.branch-action {
+  padding: 1px 6px; border-radius: 3px; font-size: 11px; line-height: 1.5;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+}
+.branch-action:hover { background: var(--accent-faint); color: var(--accent-bright); border-color: var(--accent); }
+
+/* 进行中的 Git 操作提示条(合并/挑拣冲突后常驻,直到继续或终止) */
+.op-banner {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  margin: 8px 12px 0; padding: 6px 10px;
+  background: var(--accent-faint); border: 1px solid var(--accent); border-radius: 6px;
+  font-size: 12.5px; color: var(--text);
+}
+.op-banner-dot {
+  width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent);
+}
+#op-banner-text { flex: 1; }
+.op-banner .tool-btn { padding: 2px 8px; font-size: 12px; }
 
 /* 提交信息结果面板:AI 生成完成后弹出(生成期间按钮仅加载态,不弹窗) */
 .ship-wrap { position: relative; display: inline-flex; gap: 6px; }
@@ -951,6 +976,55 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 .settings-dialog .dlg-actions { padding: 12px 18px; border-top: 1px solid var(--border); flex: none; }
 .dlg-hint { font-size: 13px; color: var(--text-dim); }
+
+/* ===== 分支对比弹窗 ===== */
+.compare-dialog { width: min(720px, 94vw); height: min(600px, 88vh); }
+.compare-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.compare-head h3 { margin: 0; }
+.compare-head .dlg-hint { margin: 4px 0 0; }
+.compare-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex: none; }
+.compare-tab {
+  padding: 6px 12px; border: none; border-bottom: 2px solid transparent;
+  background: transparent; color: var(--text-dim); font-size: 13px; cursor: pointer;
+}
+.compare-tab .num-badge { margin-left: 4px; }
+.compare-tab:hover { color: var(--text); }
+.compare-tab.active { color: var(--accent-bright); border-bottom-color: var(--accent); }
+.compare-pane { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.compare-empty { padding: 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+.compare-commit {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-radius: 4px; font-size: 12.5px;
+}
+.compare-commit:hover { background: var(--hover); }
+.cc-hash { font-family: var(--mono); color: var(--text-dim); font-size: 11px; flex: none; }
+.cc-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-author { color: var(--text-dim); font-size: 11px; flex: none; }
+.cc-pick {
+  flex: none; padding: 1px 7px; border-radius: 3px; font-size: 11px;
+  border: 1px solid var(--border); background: transparent; color: var(--accent-bright);
+}
+.cc-pick:hover { background: var(--accent-faint); border-color: var(--accent); }
+.compare-file { display: flex; flex-direction: column; border-radius: 4px; }
+.compare-file-main {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+  border-radius: 4px; font-size: 12.5px; cursor: pointer;
+}
+.compare-file-main:hover { background: var(--hover); }
+.compare-file .cf-status {
+  flex: none; width: 11px; text-align: center; font-family: var(--mono); color: var(--text-dim);
+}
+.compare-file .cf-status.s-A { color: var(--green); }
+.compare-file .cf-status.s-D { color: var(--red); }
+.compare-file .cf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.compare-file .cf-lines { flex: none; font-size: 11px; display: inline-flex; gap: 5px; font-family: var(--mono); }
+.compare-file .cf-add { color: var(--green); }
+.compare-file .cf-del { color: var(--red); }
+.compare-diff {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  margin: 2px 8px 6px; padding: 4px 0; max-height: 240px; overflow: auto;
+}
 
 /* ===== 版本号升级弹窗 ===== */
 .vb-files {
