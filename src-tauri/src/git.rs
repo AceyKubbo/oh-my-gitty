@@ -532,13 +532,15 @@ pub fn commit(repo: &str, message: &str) -> Result<String, String> {
 
 pub fn push(repo: &str) -> Result<String, String> {
     let st = status(repo);
-    if st.upstream.is_some() {
+    let result = if st.upstream.is_some() {
         run_git(repo, &["push"])
     } else if let Some(branch) = st.branch {
         run_git(repo, &["push", "-u", "origin", &branch])
     } else {
         Err("无法确定推送目标（仓库处于分离 HEAD 或没有分支）".into())
-    }
+    };
+    // git push 的进度写 stderr,而 run_git 成功只取 stdout → output 可能为空,前端 toast 会空白
+    result.map(|o| if o.trim().is_empty() { "推送成功".into() } else { o })
 }
 
 pub fn pull(repo: &str) -> Result<String, String> {
@@ -567,7 +569,8 @@ pub fn push_to_branch(repo: &str, target: &str, force: bool) -> Result<String, S
     }
     args.push(&remote);
     args.push(&spec);
-    run_git(repo, &args)
+    // 同上:git push 成功时 stdout 通常为空,给前端 toast 一个非空文案
+    run_git(repo, &args).map(|o| if o.trim().is_empty() { format!("已推送到 {remote}/{branch}") } else { o })
 }
 
 /// 推送目标远程仓库:优先取当前分支上游所在的 remote,其次 origin,最后取第一个 remote。
@@ -1633,7 +1636,8 @@ mod tests {
         run_git(r, &["remote", "add", "origin", bare.to_str().unwrap()]).unwrap();
 
         // 推送当前 HEAD 到远程的 deploy 分支(远程原本没有该分支)
-        push_to_branch(r, "deploy", false).unwrap();
+        let out = push_to_branch(r, "deploy", false).unwrap();
+        assert!(!out.trim().is_empty(), "推送成功必须返回非空文案,否则前端 toast 为空白");
         let deploy = run_git(bare.to_str().unwrap(), &["rev-parse", "refs/heads/deploy"])
             .unwrap()
             .trim()
