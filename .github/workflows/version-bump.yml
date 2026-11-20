@@ -1,0 +1,82 @@
+name: Version Bump
+
+# 版本号提升即自动发版:比对 push 前后 package.json 的版本,变化时调用 Release 工作流。
+# 用 workflow_call 而不是自动打 tag,是因为 GITHUB_TOKEN 推的 tag 不会触发其他 workflow。
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect version bump
+        id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          read_json_version() {
+            python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$1"
+          }
+
+          new=$(read_json_version package.json)
+          cargo=$(sed -nE 's/^version = "(.*)"/\1/p' src-tauri/Cargo.toml | head -1)
+          tauri=$(read_json_version src-tauri/tauri.conf.json)
+
+          if [ "$new" != "$cargo" ] || [ "$new" != "$tauri" ]; then
+            echo "::error::版本号不一致: package.json=$new, Cargo.toml=$cargo, tauri.conf.json=$tauri"
+            exit 1
+          fi
+
+          # 首次推送或 force push 时 before 不可用,无法比对则跳过
+          if [ -z "${BEFORE//0/}" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "没有可比对的先前提交,跳过自动发版"
+            exit 0
+          fi
+
+          old=$(git show "$BEFORE:package.json" | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+
+          if [ "$old" = "$new" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "版本未变化 ($new),跳过"
+            exit 0
+          fi
+
+          # 只允许版本号提升,回退视为配置错误
+          if [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -1)" != "$new" ]; then
+            echo "::error::版本号回退: $old -> $new"
+            exit 1
+          fi
+
+          # 已发布过的版本不重复构建
+          if git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "tag v$new 已存在,跳过"
+            exit 0
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "检测到版本提升: $old -> $new,将自动发布 v$new"
+
+  release:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: v${{ needs.detect.outputs.version }}
+    secrets: inherit

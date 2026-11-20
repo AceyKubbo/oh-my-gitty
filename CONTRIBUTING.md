@@ -37,16 +37,14 @@ npm run build  # 当前系统原生安装包：macOS .dmg / Windows NSIS setup.e
 
 ## 发布（维护者）
 
-推送 `v*` tag 触发 Release 工作流，自动构建 macOS/Windows 安装包并生成应用内更新所需的 `latest.json`。构建时用仓库 Secrets 中的更新签名私钥签名：
+**版本号提升即自动发版**：同时更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 三处的 `version`（必须一致），推送到 `main` 后 `Version Bump` 工作流会检测到变化，自动调用 `Release` 工作流构建三平台安装包并发布。也可以照旧手动推送 `v*` tag 触发。
 
-- `TAURI_SIGNING_PRIVATE_KEY`：`.tauri/updater.key` 的完整内容（密钥不入库，妥善备份；**丢失后已发布版本将无法收到更新**）
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：生成密钥时的密码（本仓库密钥无密码，设为空字符串）
+构建用仓库 Secrets 中的更新签名私钥签名：
 
-私钥备份在本机 macOS 钥匙串（服务名 `oh-my-gitty`，账户 `updater-signing-key`），`.tauri/` 目录不慎丢失时可找回：
+- `TAURI_SIGNING_PRIVATE_KEY`：`.tauri/updater.key` 的完整内容
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：生成密钥时的密码（本仓库密钥无密码，为空字符串）
 
-```bash
-security find-generic-password -s oh-my-gitty -a updater-signing-key -w > .tauri/updater.key
-```
+私钥只存在于本地 `.tauri/updater.key`（已 gitignore）和 GitHub Secrets（不可读回）。请务必把 `.tauri/updater.key` 另行备份到密码管理器等安全位置；**一旦丢失只能重新生成密钥并更新 `tauri.conf.json` 的 pubkey，届时已发布版本将无法通过更新签名校验**。
 
 ## 协议
 

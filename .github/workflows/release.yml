@@ -1,11 +1,23 @@
 name: Release
 
 on:
+  # 手动打 tag 发版(保留原有入口)
   push:
     tags: ['v*']
+  # 版本号提升时由 version-bump 工作流调用
+  workflow_call:
+    inputs:
+      tag:
+        description: '要发布的 tag,例如 v0.3.1'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+# GITHUB_REF_NAME 在 tag push 下是 tag 名;workflow_call 下取传入的 tag
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   create-release:
@@ -19,13 +31,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes=".github/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
-          args=(--draft --title "Oh My Gitty $GITHUB_REF_NAME")
+          args=(--draft --title "Oh My Gitty $RELEASE_TAG")
           if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
           # 重跑时 Release 可能已存在,复用它避免 gh release create 失败
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists, reusing it."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists, reusing it."
           else
-            gh release create "$GITHUB_REF_NAME" "${args[@]}"
+            gh release create "$RELEASE_TAG" "${args[@]}"
           fi
 
   build-macos:
@@ -74,7 +86,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release upload "$GITHUB_REF_NAME"
+          gh release upload "$RELEASE_TAG"
           src-tauri/target/release/bundle/dmg/*.dmg
           src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz
           src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz.sig
@@ -128,7 +140,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release upload "$GITHUB_REF_NAME"
+          gh release upload "$RELEASE_TAG"
           src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Oh.My.Gitty_aarch64.app.tar.gz
           src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Oh.My.Gitty_aarch64.app.tar.gz.sig
@@ -212,12 +224,11 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           $files = @()
           $files += (Resolve-Path "src-tauri/target/release/bundle/nsis/*-setup.exe").Path
           $files += (Resolve-Path "src-tauri/target/release/bundle/nsis/*-setup.exe.sig").Path
-          gh release upload "$env:TAG" $files --clobber
+          gh release upload "$env:RELEASE_TAG" $files --clobber
 
   publish-release:
     needs: [build-macos, build-macos-arm, build-windows]
@@ -236,10 +247,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir sigs
-          gh release download "$GITHUB_REF_NAME" --pattern "*.sig" --dir sigs
-          gh release view "$GITHUB_REF_NAME" --json body -q .body > release-notes.md || true
-          node scripts/release_manifest.mjs "$GITHUB_REF_NAME" "AceyKubbo/oh-my-gitty" sigs latest.json release-notes.md
-          gh release upload "$GITHUB_REF_NAME" latest.json --clobber
+          gh release download "$RELEASE_TAG" --pattern "*.sig" --dir sigs
+          gh release view "$RELEASE_TAG" --json body -q .body > release-notes.md || true
+          node scripts/release_manifest.mjs "$RELEASE_TAG" "AceyKubbo/oh-my-gitty" sigs latest.json release-notes.md
+          gh release upload "$RELEASE_TAG" latest.json --clobber
 
       # .sig 的内容已经写入 latest.json,无需作为面向用户的 Release 资产展示。
       # 删除前已完成清单生成,不会影响 Tauri updater 的签名校验。
@@ -248,13 +259,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mapfile -t signature_assets < <(
-            gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name | select(endswith(".sig"))'
+            gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name | select(endswith(".sig"))'
           )
           for asset in "${signature_assets[@]}"; do
-            gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes
+            gh release delete-asset "$RELEASE_TAG" "$asset" --yes
           done
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+        run: gh release edit "$RELEASE_TAG" --draft=false
