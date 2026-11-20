@@ -641,18 +641,129 @@ export function syncEditorToggle() {
 
 function closeDiffPanel() { setEditorVisible(false); }
 
-// diff 渲染:只展示实际改动内容,滤掉 git diff 的元信息行
-// (diff --git / index / --- / +++ / @@ 均为定位或文件头信息,标题已含文件名,省略以保持简洁)
+/* ===== 并排差异视图 =====
+   左栏=上一版本(父提交),右栏=此提交。
+   unified diff 先按 hunk 解析成行,再按「连续改动 / 连续未改动」分段;
+   未改动段超过 CONTEXT 行时只保留首尾若干行,中间折叠成可点击的展开条。*/
+const DIFF_CONTEXT_LINES = 3;
+
+function isDiffMeta(line) {
+  return line.startsWith("diff --git ")
+    || line.startsWith("index ")
+    || line.startsWith("new file mode ")
+    || line.startsWith("deleted file mode ")
+    || line.startsWith("old mode ")
+    || line.startsWith("new mode ")
+    || line.startsWith("similarity index ")
+    || line.startsWith("rename from ")
+    || line.startsWith("rename to ")
+    || line.startsWith("Binary files ")
+    || line.startsWith("GIT binary patch")
+    || line.startsWith("--- ")
+    || line.startsWith("+++ ")
+    || line.startsWith("\\");
+}
+
+// 解析成段:{t:"ctx",rows} | {t:"change",dels,adds} | {t:"gap",count}
+function parseDiffSegments(text) {
+  const hunks = [];
+  let cur = null, oldNo = 0, newNo = 0;
+  for (const raw of String(text).split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.startsWith("@@")) {
+      if (cur) cur.oldEnd = oldNo;
+      const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      oldNo = m ? Number(m[1]) : 0;
+      newNo = m ? Number(m[3]) : 0;
+      cur = { oldStart: oldNo, rows: [] };
+      hunks.push(cur);
+      continue;
+    }
+    if (!cur || isDiffMeta(line)) continue;
+    if (line.startsWith("+")) cur.rows.push({ t: "add", text: line.slice(1), n: newNo++ });
+    else if (line.startsWith("-")) cur.rows.push({ t: "del", text: line.slice(1), n: oldNo++ });
+    else if (line.startsWith(" ")) cur.rows.push({ t: "ctx", text: line.slice(1), o: oldNo++, n: newNo++ });
+  }
+  if (cur) cur.oldEnd = oldNo;
+
+  const segments = [];
+  let prevOldEnd = null;
+  for (const h of hunks) {
+    // hunk 之间被 git 省略的未改动行
+    if (prevOldEnd !== null && h.oldStart > prevOldEnd) {
+      segments.push({ t: "gap", count: h.oldStart - prevOldEnd });
+    }
+    let i = 0;
+    while (i < h.rows.length) {
+      if (h.rows[i].t === "ctx") {
+        const run = [];
+        while (i < h.rows.length && h.rows[i].t === "ctx") run.push(h.rows[i++]);
+        segments.push({ t: "ctx", rows: run });
+      } else {
+        const dels = [], adds = [];
+        while (i < h.rows.length && h.rows[i].t !== "ctx") {
+          const x = h.rows[i++];
+          (x.t === "del" ? dels : adds).push(x);
+        }
+        segments.push({ t: "change", dels, adds });
+      }
+    }
+    prevOldEnd = h.oldEnd;
+  }
+  return segments;
+}
+
 function renderDiff(text) {
-  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return text.split("\n").map((line) => {
-    if (line.startsWith("diff --git ") || line.startsWith("index ")
-      || line.startsWith("---") || line.startsWith("+++") || line.startsWith("@@")) return "";
-    let cls = "d-ctx", sign = " ", body = line;
-    if (line.startsWith("+")) { cls = "d-add"; sign = "+"; body = line.slice(1); }
-    else if (line.startsWith("-")) { cls = "d-del"; sign = "-"; body = line.slice(1); }
-    return `<div class="d-row ${cls}"><span class="d-gutter">${sign}</span><span class="d-text">${esc(body)}</span></div>`;
-  }).join("");
+  const segments = parseDiffSegments(text);
+  if (!segments.length) return '<span class="d-empty">无文本差异（可能为二进制文件）</span>';
+  const num = (n, cls) => `<span class="sd-num ${cls || ""}">${n == null ? "" : n}</span>`;
+  const code = (txt, cls) => `<span class="sd-code ${cls || ""}">${escapeHtml(txt)}</span>`;
+  const ctxRow = (r) =>
+    `<div class="sd-row sd-ctx">${num(r.o)}${code(r.text)}${num(r.n)}${code(r.text)}</div>`;
+
+  let uid = 0;
+  const collapse = (count, rows) => {
+    const id = "sd-hidden-" + (++uid);
+    return `<div class="sd-collapse" data-target="${id}">⋯ 展开 ${count} 行未更改内容 ⋯</div>`
+      + `<div class="sd-hidden" id="${id}" data-count="${count}">${rows.map(ctxRow).join("")}</div>`;
+  };
+
+  let html = '<div class="side-diff">'
+    + '<div class="sd-head"><span></span><span class="sd-side">上一版本</span>'
+    + '<span></span><span class="sd-side">此提交<button class="sd-toggle-all">全部展开</button></span></div>'
+    + '<div class="sd-body">';
+  for (const seg of segments) {
+    if (seg.t === "gap" || seg.t === "ctx") {
+      const rows = seg.t === "ctx" ? seg.rows : [];
+      if (seg.t === "ctx" && rows.length <= DIFF_CONTEXT_LINES * 2) {
+        html += rows.map(ctxRow).join("");
+      } else {
+        const head = rows.slice(0, DIFF_CONTEXT_LINES);
+        const tail = rows.slice(-DIFF_CONTEXT_LINES);
+        const middle = rows.slice(DIFF_CONTEXT_LINES, rows.length - DIFF_CONTEXT_LINES);
+        const count = seg.t === "gap" ? seg.count : middle.length;
+        html += head.map(ctxRow).join("");
+        if (count > 0) {
+          // hunk 之间被 git 省略的行没有内容可展开,只做信息提示
+          html += seg.t === "gap"
+            ? `<div class="sd-collapse sd-gap">⋯ 此处省略 ${count} 行未更改内容 ⋯</div>`
+            : collapse(count, middle);
+        }
+        html += tail.map(ctxRow).join("");
+      }
+    } else {
+      const { dels, adds } = seg;
+      const len = Math.max(dels.length, adds.length);
+      for (let i = 0; i < len; i++) {
+        const d = dels[i], a = adds[i];
+        html += '<div class="sd-row sd-chg">'
+          + num(d ? d.n : "") + code(d ? d.text : "", d ? "sd-del" : "sd-empty")
+          + num(a ? a.n : "") + code(a ? a.text : "", a ? "sd-add" : "sd-empty")
+          + "</div>";
+      }
+    }
+  }
+  return html + "</div></div>";
 }
 
 // 规范化 .gitignore 排版:注释段落前空一行(跟在规则行后时)、连续空行合一、
@@ -698,6 +809,29 @@ export function bindPanelEvents() {
   document.querySelectorAll(".editor-tab").forEach((b) =>
     b.addEventListener("click", () => setEditorTab(b.dataset.tab))
   );
+  // 并排差异:折叠的未改动块按需展开/收起(事件委托,内容异步替换仍生效)
+  $("diff-content").addEventListener("click", (ev) => {
+    const setBar = (bar, open) => {
+      const target = document.getElementById(bar.dataset.target);
+      if (!target) return false;
+      target.classList.toggle("open", open);
+      bar.classList.toggle("open", open);
+      bar.textContent = `⋯ ${open ? "收起" : "展开"} ${target.dataset.count} 行未更改内容 ⋯`;
+      return true;
+    };
+    const bar = ev.target.closest(".sd-collapse");
+    if (bar) {
+      setBar(bar, !bar.classList.contains("open"));
+      return;
+    }
+    const all = ev.target.closest(".sd-toggle-all");
+    if (all) {
+      const bars = [...all.closest(".side-diff").querySelectorAll(".sd-collapse")];
+      const open = bars.some((b) => !b.classList.contains("open"));
+      bars.forEach((b) => setBar(b, open));
+      all.textContent = open ? "全部收起" : "全部展开";
+    }
+  });
   // 文件树:展开/折叠全部目录
   document.querySelectorAll(".tree-toggle-all").forEach((b) =>
     b.addEventListener("click", (ev) => {
@@ -710,10 +844,16 @@ export function bindPanelEvents() {
 
   // 右侧编辑器宽度拖拽调整(与侧栏 resizer 同款交互)
   const DIFF_W_MIN = 240, DIFF_W_MAX = 900;
+  // 左侧暂存/更改面板必须保留的最小宽度(与 CSS --main-min-width 同源),
+  // 拖宽 diff 时不能把它压到该值以下,否则文件名会被右侧行内操作按钮遮挡
+  const mainMinWidth = () =>
+    parseInt(getComputedStyle(document.documentElement).getPropertyValue("--main-min-width"), 10) || 300;
   let diffDragStartX = 0, diffDragStartW = 0;
   const onDiffDrag = (e) => {
     // 拖手柄向右 → 面板变宽(手柄在面板左缘,增量取反)
-    const w = Math.min(DIFF_W_MAX, Math.max(DIFF_W_MIN, diffDragStartW + diffDragStartX - e.clientX));
+    const room = $("main-row").clientWidth - mainMinWidth();
+    const upper = Math.max(DIFF_W_MIN, Math.min(DIFF_W_MAX, room));
+    const w = Math.min(upper, Math.max(DIFF_W_MIN, diffDragStartW + diffDragStartX - e.clientX));
     $("diff-panel").style.width = w + "px";
   };
   const endDiffDrag = () => {

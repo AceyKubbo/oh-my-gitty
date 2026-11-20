@@ -27,6 +27,9 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
+  /* 暂存/更改面板最小宽度:文件名/目录名(含一层缩进)+ 右侧行内操作按钮不被遮挡的最小空间。
+     同时用作右侧 diff 面板的宽度上限,拖宽 diff 时不会把左侧压到该值以下。 */
+  --main-min-width: 300px;
   --surface-0: #151515;
   --surface-1: #1a1a1a;
   --surface-2: #202020;
@@ -507,7 +510,9 @@ select option { background: var(--input-bg); color: var(--text); }
 #sidebar.hidden + #content { border-left: none; }
 /* 主区行:左侧仓库面板 + 右侧 diff 面板并排,等高,各自独立滚动 */
 #main-row { flex: 1; display: flex; min-height: 0; min-width: 0; }
-#main { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; min-width: 0; }
+/* min-width 保证暂存/更改列表里的文件名 + 右侧操作按钮始终有足够空间,不被遮挡/换行;
+   diff 面板再宽也不能把它压窄 */
+#main { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; min-width: var(--main-min-width); }
 
 /* ===== 侧栏仓库列表 ===== */
 #sidebar {
@@ -976,6 +981,14 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 .settings-dialog .dlg-actions { padding: 12px 18px; border-top: 1px solid var(--border); flex: none; }
 .dlg-hint { font-size: 13px; color: var(--text-dim); }
+/* 对话框表单:字段标签 + 复选说明 */
+.field-label { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+.checkbox-row {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12.5px; color: var(--text); line-height: 1.5; cursor: pointer;
+}
+.checkbox-row input { accent-color: var(--accent); flex: none; margin: 1px 0 0; }
+#push-branch-cmd { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
 
 /* ===== 分支对比弹窗 ===== */
 .compare-dialog { width: min(720px, 94vw); height: min(600px, 88vh); }
@@ -1088,7 +1101,8 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 /* diff 面板(右侧):点击文件在右侧展示差异,不遮挡左侧操作区
    固定宽度,内部独立滚动;与左侧面板等高 */
 #diff-panel {
-  flex: none; width: 50%; display: flex; flex-direction: column;
+  flex: none; width: 50%; max-width: calc(100% - var(--main-min-width));
+  display: flex; flex-direction: column;
   min-height: 0; border-left: 1px solid var(--border);
   background: var(--panel); position: relative; /* resizer 的定位锚点 */
 }
@@ -1125,6 +1139,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 #diff-resizer::before { content: ""; position: absolute; inset: 0 -2px; }
 #diff-resizer:hover { background: var(--accent); } /* 悬停显色提示可拖 */
+/* 文件列表内联 diff 预览(git-ops.js 的 d-row 渲染) */
 .d-row { display: flex; align-items: baseline; }
 .d-gutter { flex: none; width: 22px; text-align: center; user-select: none; -webkit-user-select: none; opacity: .55; }
 .d-text { flex: 1; white-space: pre-wrap; word-break: break-all; padding-right: 12px; }
@@ -1135,6 +1150,52 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .d-row.d-del .d-gutter { color: var(--red); }
 .d-row.d-del .d-text { color: var(--status-soft-red); }
 .d-row.d-ctx .d-text { color: var(--text); }
+/* 并排差异:左=上一版本,右=此提交;行号栏固定宽,代码区等宽且各自可滚动换行 */
+.side-diff { min-width: 0; font-family: var(--mono); }
+.sd-head, .sd-row {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
+}
+.sd-head {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--panel-2); border-bottom: 1px solid var(--border);
+}
+.sd-side {
+  padding: 6px 10px; font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 11.5px; font-weight: 600; color: var(--text-head);
+}
+.sd-toggle-all {
+  float: right; font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-size: 11px;
+  font-weight: 400; color: var(--accent-bright);
+  background: transparent; border: none; cursor: pointer; padding: 0 2px;
+}
+.sd-toggle-all:hover { text-decoration: underline; }
+.sd-row { align-items: baseline; }
+.sd-num {
+  padding: 1px 7px 1px 4px; text-align: right; font-size: 11px;
+  color: var(--text-dim); border-right: 1px solid var(--border);
+  user-select: none; -webkit-user-select: none;
+}
+.sd-code {
+  min-width: 0; padding: 1px 9px; white-space: pre-wrap;
+  word-break: break-word; overflow-wrap: anywhere;
+}
+.sd-row > :nth-child(2) { border-right: 1px solid var(--border); }
+.sd-chg .sd-del { background: var(--status-danger-faint-2); color: var(--status-soft-red); }
+.sd-chg .sd-add { background: var(--status-add-faint); color: var(--status-add-text); }
+.sd-chg .sd-empty { background: var(--hover); }
+/* 未改动块折叠条:点击就地展开,不重新请求 */
+.sd-collapse {
+  display: block; width: 100%; padding: 3px 8px;
+  font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-size: 11px;
+  color: var(--accent-bright); text-align: center; cursor: pointer;
+  background: var(--accent-faint); border: none;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.sd-collapse:hover { background: var(--hover); }
+.sd-collapse.sd-gap { cursor: default; opacity: .8; }
+.sd-collapse.sd-gap:hover { background: var(--accent-faint); }
+.sd-hidden { display: none; }
+.sd-hidden.open { display: block; }
 .d-empty, .d-load {
   color: var(--text-dim); display: flex; align-items: center; justify-content: center;
   min-height: 100%; padding: 8px 12px;
@@ -1198,10 +1259,19 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 #diff-panel.code-dark .editor-tab.active::after { background: #4fc1ff; }
 #diff-panel.code-dark .diff-content { background: #1e1e1e; color: #d4d4d4; }
 #diff-panel.code-dark .diff-context { background: #2a2d2e; color: #9cdcfe; }
+#diff-panel.code-dark .c-text,
 #diff-panel.code-dark .d-ctx .d-text,
-#diff-panel.code-dark .c-text { color: #d4d4d4; }
+#diff-panel.code-dark .sd-ctx .sd-code { color: #d4d4d4; }
+#diff-panel.code-dark .c-num,
 #diff-panel.code-dark .d-gutter,
-#diff-panel.code-dark .c-num { color: #6e7681; border-right-color: #333; }
+#diff-panel.code-dark .sd-num { color: #6e7681; border-right-color: #333; }
+#diff-panel.code-dark .sd-head { background: #252526; border-bottom-color: #333; }
+#diff-panel.code-dark .sd-side { color: #cccccc; }
+#diff-panel.code-dark .sd-row > :nth-child(2) { border-right-color: #333; }
+#diff-panel.code-dark .sd-collapse { background: #2a2d2e; color: #4fc1ff; border-color: #333; }
+#diff-panel.code-dark .sd-chg .sd-del { background: #4b2525; color: #f48771; }
+#diff-panel.code-dark .sd-chg .sd-add { background: #1e3a2b; color: #89d185; }
+#diff-panel.code-dark .sd-chg .sd-empty { background: #2a2d2e; }
 #diff-panel.code-dark .d-empty,
 #diff-panel.code-dark .d-load { color: #6e7681; }
 #diff-panel.code-dark .merge-col + .merge-col { border-left-color: #333; }

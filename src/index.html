@@ -145,6 +145,7 @@
           <div id="more-menu" class="more-menu hidden">
             <button id="btn-more-open-dir">打开本地目录</button>
             <button id="btn-more-gitignore">忽略规则</button>
+            <button id="btn-more-push-branch">推送到其他分支…</button>
             <button id="btn-more-remove" class="danger-item">关闭项目</button>
           </div>
         </div>
@@ -389,6 +390,23 @@
         <button class="tool-btn" id="btn-branch-op-cancel">取消</button>
         <span class="spacer"></span>
         <button class="tool-btn primary" id="btn-branch-op-confirm">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 推送当前分支到其他远程分支(refspec 推送) -->
+  <div class="overlay hidden" id="dlg-push-branch">
+    <div class="dialog">
+      <h3>推送到其他分支</h3>
+      <p class="dlg-hint">把当前分支 <span id="push-branch-from" class="mono"></span> 的提交推送到远程仓库的指定分支，不会改变当前分支的上游设置。</p>
+      <label class="field-label" for="push-branch-target">远程分支名</label>
+      <input id="push-branch-target" type="text" placeholder="例如：deploy、release/v1.0" autocomplete="off" />
+      <label class="checkbox-row"><input id="push-branch-force" type="checkbox" /> 强制推送（--force-with-lease：仅当远程分支未被他人更新时覆盖）</label>
+      <p class="dlg-hint" id="push-branch-cmd"></p>
+      <div class="dlg-actions">
+        <button class="tool-btn" id="btn-push-branch-cancel">取消</button>
+        <span class="spacer"></span>
+        <button class="tool-btn primary" id="btn-push-branch-confirm">推送</button>
       </div>
     </div>
   </div>

@@ -435,6 +435,7 @@ function renderBranchGroups(box, b) {
         acts.append(
           mk("合并", () => askBranchOp("merge", name)),
           mk("对比", () => openCompare(name)),
+          mk("推送", () => askPushToBranch(name.replace(/^origin\//, ""))),
         );
         item.appendChild(acts);
       }
@@ -579,6 +580,50 @@ async function abortOperation() {
   await refresh();
 }
 
+/* ===== 推送当前分支到其他远程分支(带 refspec 的推送) ===== */
+// 当前分支名:分支菜单打开时有缓存,否则退回 HEAD
+function currentBranchName() {
+  const cached = branchCache && branchCache.repo === repo ? branchCache.data : null;
+  return (cached && cached.current) || "HEAD";
+}
+
+function askPushToBranch(prefill) {
+  if (!repo) { toast("请先打开项目", false); return; }
+  $("branch-menu").classList.add("hidden");
+  $("more-menu").classList.add("hidden");
+  let name = String(prefill || "").replace(/^origin\//, "").replace(/^refs\/heads\//, "");
+  if (name === "HEAD") name = ""; // 分离 HEAD 时不预填非法分支名
+  $("push-branch-from").textContent = currentBranchName();
+  $("push-branch-target").value = name;
+  $("push-branch-force").checked = false;
+  syncPushBranchCmd();
+  $("dlg-push-branch").classList.remove("hidden");
+  $("push-branch-target").focus();
+}
+
+function syncPushBranchCmd() {
+  const t = $("push-branch-target").value.trim();
+  const force = $("push-branch-force").checked ? " --force-with-lease" : "";
+  $("push-branch-cmd").textContent = t
+    ? `git push <远程>${force} HEAD:refs/heads/${t}`
+    : "请输入远程分支名";
+}
+
+async function confirmPushToBranch() {
+  const target = $("push-branch-target").value.trim();
+  if (!target) { toast("请输入远程分支名", false); return; }
+  const force = $("push-branch-force").checked;
+  $("dlg-push-branch").classList.add("hidden");
+  setBusy(true, "推送中…");
+  let r = null;
+  try { r = await invoke("git_push_to_branch", { repo, branch: target, force }); }
+  catch (e) { toast(String(e), false); }
+  finally { setBusy(false); }
+  if (r && r.ok) await invoke("git_fetch", { repo }).catch(() => {}); // 更新 ahead/behind 与远程跟踪分支
+  if (r) toast(r.output, r.ok);
+  await refresh();
+}
+
 /* ===== 分支对比 ===== */
 let compareCtx = null; // { repoPath, base, target, data }
 
@@ -718,6 +763,18 @@ export function bindGitEvents() {
   // 进行中操作提示条
   $("btn-op-continue").addEventListener("click", continueOperation);
   $("btn-op-abort").addEventListener("click", abortOperation);
+  // 推送到其他远程分支
+  $("btn-more-push-branch").addEventListener("click", (e) => {
+    e.stopPropagation();
+    askPushToBranch(currentBranchName());
+  });
+  $("btn-push-branch-cancel").addEventListener("click", () => $("dlg-push-branch").classList.add("hidden"));
+  $("btn-push-branch-confirm").addEventListener("click", confirmPushToBranch);
+  $("push-branch-target").addEventListener("input", syncPushBranchCmd);
+  $("push-branch-target").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); confirmPushToBranch(); }
+  });
+  $("push-branch-force").addEventListener("change", syncPushBranchCmd);
   // 分支对比弹窗
   $("btn-compare-close").addEventListener("click", () => $("dlg-compare").classList.add("hidden"));
   $("btn-compare-cancel").addEventListener("click", () => $("dlg-compare").classList.add("hidden"));

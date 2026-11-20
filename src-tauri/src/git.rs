@@ -545,6 +545,80 @@ pub fn pull(repo: &str) -> Result<String, String> {
     run_git(repo, &["pull"])
 }
 
+/// 当前 HEAD 推送到远程仓库的指定分支(不修改当前分支的上游)。
+/// target 可写 "deploy"、"origin/deploy" 或 "refs/heads/deploy",统一规范化为分支名。
+/// force=true 时用 --force-with-lease:仅当远程分支未被他人更新才覆盖,比 --force 安全。
+pub fn push_to_branch(repo: &str, target: &str, force: bool) -> Result<String, String> {
+    let remote = push_remote(repo)?;
+    let mut branch = target.trim().replace('\\', "/");
+    if let Some(rest) = branch.strip_prefix("refs/heads/") {
+        branch = rest.to_string();
+    }
+    let prefix = format!("{remote}/");
+    if let Some(rest) = branch.strip_prefix(&prefix) {
+        branch = rest.to_string();
+    }
+    validate_push_branch(&branch)?;
+
+    let spec = format!("HEAD:refs/heads/{branch}");
+    let mut args: Vec<&str> = vec!["push"];
+    if force {
+        args.push("--force-with-lease");
+    }
+    args.push(&remote);
+    args.push(&spec);
+    run_git(repo, &args)
+}
+
+/// 推送目标远程仓库:优先取当前分支上游所在的 remote,其次 origin,最后取第一个 remote。
+fn push_remote(repo: &str) -> Result<String, String> {
+    if let Some(up) = upstream(repo) {
+        if let Some((r, _)) = up.split_once('/') {
+            if !r.is_empty() {
+                return Ok(r.to_string());
+            }
+        }
+    }
+    if run_git(repo, &["remote", "get-url", "origin"]).is_ok() {
+        return Ok("origin".to_string());
+    }
+    run_git(repo, &["remote"])
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "未配置远程仓库，无法推送".to_string())
+}
+
+/// 校验目标分支名,阻断注入与非法 refname(git check-ref-format 的子集)。
+fn validate_push_branch(name: &str) -> Result<(), String> {
+    let invalid = name.is_empty()
+        || name.starts_with('-')
+        || name.starts_with('/')
+        || name.ends_with('/')
+        || name.ends_with(".lock")
+        || name.contains("..")
+        || name.contains("@{")
+        || name.contains(' ')
+        || name.contains('\t')
+        || name.contains('~')
+        || name.contains('^')
+        || name.contains(':')
+        || name.contains('?')
+        || name.contains('*')
+        || name.contains('[')
+        || name.chars().any(|c| c.is_control())
+        || name
+            .split('/')
+            .any(|c| c.is_empty() || c.starts_with('.') || c.ends_with('.'));
+    if invalid {
+        Err("分支名不合法（不可含空格、..、@{、~^:?*[ 等字符）".into())
+    } else {
+        Ok(())
+    }
+}
+
 /// 静默更新远程跟踪分支(refs/remotes/...),不修改工作区。
 /// 供前端后台 fetch:拉取最新远程状态后,ahead/behind 徽标与远程历史才有意义。
 pub fn fetch(repo: &str) -> Result<String, String> {
@@ -1542,5 +1616,64 @@ mod tests {
         assert_eq!(operation_state(r), "none");
         assert!(log(r, 1)[0].subject.starts_with("Merge"));
         std::fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn push_to_another_remote_branch() {
+        let bare = std::env::temp_dir().join(format!("ohmygitty-push-bare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&bare);
+        std::fs::create_dir_all(&bare).unwrap();
+        run_git(bare.to_str().unwrap(), &["init", "-q", "--bare"]).unwrap();
+
+        let repo = temp_repo("push-branch");
+        let r = repo.to_str().unwrap();
+        std::fs::write(repo.join("a.txt"), "v1\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "first").unwrap();
+        run_git(r, &["remote", "add", "origin", bare.to_str().unwrap()]).unwrap();
+
+        // 推送当前 HEAD 到远程的 deploy 分支(远程原本没有该分支)
+        push_to_branch(r, "deploy", false).unwrap();
+        let deploy = run_git(bare.to_str().unwrap(), &["rev-parse", "refs/heads/deploy"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(Some(deploy.clone()), head_hash(r));
+        assert_eq!(upstream(r), None, "不应改变当前分支的上游");
+
+        // origin/ 前缀与 refs/heads/ 前缀都应规范化成同一分支
+        std::fs::write(repo.join("a.txt"), "v2\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "second").unwrap();
+        push_to_branch(r, "origin/deploy", false).unwrap();
+        let deploy2 = run_git(bare.to_str().unwrap(), &["rev-parse", "refs/heads/deploy"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(Some(deploy2.clone()), head_hash(r));
+        assert_ne!(deploy, deploy2);
+
+        // 非快进推送被拒绝,force(force-with-lease)可覆盖
+        reset_hard(r, &deploy).unwrap();
+        std::fs::write(repo.join("a.txt"), "diverged\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "diverged").unwrap();
+        assert!(push_to_branch(r, "deploy", false).is_err(), "非快进应被拒绝");
+        fetch(r).unwrap(); // 更新 origin/deploy 的 lease 基准
+        push_to_branch(r, "refs/heads/deploy", true).unwrap();
+        assert_eq!(
+            run_git(bare.to_str().unwrap(), &["rev-parse", "refs/heads/deploy"])
+                .unwrap()
+                .trim(),
+            head_hash(r).unwrap()
+        );
+
+        // 非法分支名直接拒绝
+        assert!(push_to_branch(r, "bad..name", false).is_err());
+        assert!(push_to_branch(r, "-x", false).is_err());
+        assert!(push_to_branch(r, "has space", false).is_err());
+
+        std::fs::remove_dir_all(repo).ok();
+        std::fs::remove_dir_all(bare).ok();
     }
 }

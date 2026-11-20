@@ -1632,6 +1632,16 @@ async fn git_pull(repo: String) -> OpResult {
     )
 }
 
+/// 把当前 HEAD 推送到远程的指定分支(带 refspec 的推送,不改变上游)
+#[tauri::command]
+async fn git_push_to_branch(repo: String, branch: String, force: bool) -> OpResult {
+    op(
+        tauri::async_runtime::spawn_blocking(move || git::push_to_branch(&repo, &branch, force))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string())),
+    )
+}
+
 /// 后台静默 fetch:更新远程跟踪分支;失败(无远程/无网络/未认证)返回 ok:false,
 /// 由前端静默忽略,不打扰用户。
 #[tauri::command]
@@ -1967,6 +1977,7 @@ pub fn run() {
             git_discard_file,
             git_commit,
             git_push,
+            git_push_to_branch,
             git_push_with_token,
             open_auth_page,
             open_url,
