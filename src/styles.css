@@ -767,6 +767,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
   display: flex; align-items: center; gap: 8px;
   text-align: left; padding: 6px 10px; border-radius: 4px;
   font-size: 13px; color: var(--text);
+  white-space: nowrap; /* 菜单项标签不换行,避免长文案(如"推送到其他分支…")被折行 */
 }
 .more-menu button svg { flex: none; opacity: .65; }
 .more-menu button:hover { background: var(--hover-strong); color: var(--text); }
