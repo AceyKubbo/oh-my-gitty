@@ -25,6 +25,8 @@ async function init() {
     settings.ai = { ...DEFAULT_AI, ...settings.ai }; // 兼容旧配置,补齐新字段
     settings.repos = settings.repos || [];
   } catch (_) { settings.repos = []; }
+  // 自动带入同仓库的其它 worktree:覆盖升级后首次打开、外部新建 worktree 后重启等场景
+  try { settings.repos = await invoke("repos_sync_worktrees"); } catch (_) {}
   // 先用 settings 主题,但若 settings 是首次启动(无 theme 字段)走 DEFAULT_THEME 跟随系统
   applyTheme(settings.theme || DEFAULT_THEME);
   // 主题色与明暗模式正交:旧配置无 accent 字段时回落默认紫色

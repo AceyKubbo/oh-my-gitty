@@ -1,11 +1,15 @@
 /* 仓库面板视图:刷新主区(状态+历史)、空态、文件列表(暂存/更改/冲突)、diff 视图、
    忽略规则对话框、「更多」菜单 */
 import { $, invoke, toast, setButtonLoading, STATUS_CHARS, repo, view, repos, settings, lastShipStatus, setLastShipStatus, setNumBadge } from "./state.js";
-import { updateProjectHeader, renderRepoList, removeRepo, switchRepo } from "./sidebar.js";
+import { updateProjectHeader, renderRepoList, removeRepo, switchRepo, findRepoEntry } from "./sidebar.js";
 import { renderHistory } from "./history.js";
 import { toggleStage, stagePaths, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache, syncOpBanner } from "./git-ops.js";
 
 const sectionUserSet = new Set(); // 用户手动切换过的分组:自动收起规则不再覆盖其状态
+
+// 子模块父仓库指针状态:由 git_refresh 一并返回并缓存,提示条渲染与「切回父仓库」
+// 按钮直接复用,不再为一条提示条单独发一次 git_submodule_parent_state 请求。
+let lastSubmoduleParent = null;
 
 /* ===== 主区刷新 ===== */
 export async function refresh() {
@@ -15,11 +19,21 @@ export async function refresh() {
   if (diffRepo && diffRepo !== targetRepo) closeDiffPanel();
   invalidateBranchCache(); // 仓库状态已变(切分支/推送/拉取等),分支缓存作废
   updateProjectHeader(); // 顶部标题栏:当前项目图标 + 名称
-  // 一次拉取合并的 status + history(后端复用 status 的 branch 信息,省去重复 git 进程)
-  const data = await invoke("git_refresh", { repo: targetRepo });
+  // 一次拉取合并的 status + history + 子模块父状态(后端并行执行)。
+  // 侧栏已发现的子模块直接把 parent/rel_path 传给后端走快速路径,免去子模块发现进程。
+  const entry = findRepoEntry(targetRepo);
+  const hint = entry && entry.submodule
+    ? { parent: entry.parent, rel_path: entry.rel_path }
+    : null;
+  const data = await invoke("git_refresh", {
+    repo: targetRepo,
+    parent: hint ? hint.parent : null,
+    rel_path: hint ? hint.rel_path : null,
+  });
   // 总览/切换项目期间,旧请求返回的数据不能重新显示项目级工具栏和面板
   if (view !== "repo" || repo !== targetRepo) return;
   const st = data.status, hist = data.history;
+  lastSubmoduleParent = data.submodule_parent || null;
   // 进行中的合并/挑拣/回退:常驻提示条(冲突解决后可继续或终止)
   syncOpBanner(data.operation, st.conflicts.length);
   // 就地同步侧栏摘要:角标(未暂存+未跟踪+冲突)/领先落后数/最近提交时间随面板操作即时更新,
@@ -43,17 +57,14 @@ export async function refresh() {
   }
   showPanel(st);
   renderHistory(hist, st.branch);
-  await syncSubmoduleBanner(targetRepo); // 子模块:父仓库指针提交状态
+  syncSubmoduleBanner(lastSubmoduleParent); // 子模块:父仓库指针提交状态(随本次刷新返回)
 }
 
 // 子模块视图:展示父仓库是否已把本子模块的指针(gitlink)改动提交进去。
-// 普通仓库隐藏该提示条;所有 git 失败都静默,不打断正常刷新。
-async function syncSubmoduleBanner(repoPath) {
+// 状态由 git_refresh 一并返回(普通仓库为 null),这里只做就地渲染,不再发请求。
+function syncSubmoduleBanner(info) {
   const banner = $("sec-submodule");
   if (!banner) return;
-  let info = null;
-  try { info = await invoke("git_submodule_parent_state", { repo: repoPath }); } catch (_) {}
-  if (repo !== repoPath) return; // 刷新期间用户已切换仓库:丢弃过期结果
   if (!info || !info.parent) { banner.classList.add("hidden"); return; }
   banner.classList.remove("hidden");
   const np = (p) => String(p || "").replace(/\/+$/, "");
@@ -99,6 +110,27 @@ function hideRefreshing() {
   return new Promise((resolve) => setTimeout(() => { el.classList.add("hidden"); resolve(); }, wait));
 }
 
+/* ===== 切库整体加载态 =====
+   一个标记覆盖 switchRepo 的完整链路:git 刷新 → 子模块提示 → 文件监听重建 →
+   运行栏/提交面板回填。期间 showPanel/showEmpty 不再提前收起占位,避免动画只盖住
+   git_refresh、后续步骤却在"看似加载完"的界面里继续执行(卡顿感的主因之一)。 */
+let switchDepth = 0; // 计数而非布尔:连续快速切库时,只有最后一个结束才收起占位
+
+function isSwitching() { return switchDepth > 0; }
+
+export function beginSwitchLoading() {
+  switchDepth++;
+  const text = $("refreshing-text");
+  if (text) text.textContent = "正在切换仓库…";
+  showRefreshing();
+}
+
+export async function endSwitchLoading() {
+  switchDepth = Math.max(0, switchDepth - 1);
+  if (isSwitching()) return; // 还有未完成的切库,占位继续保留
+  await hideRefreshing();
+}
+
 export async function showEmpty(showInit) {
   const { leaveOverview } = await import("./dashboard.js");
   leaveOverview();
@@ -110,7 +142,7 @@ export async function showEmpty(showInit) {
   $("project-header").classList.toggle("hidden", !repo);
   $("toolbar").classList.add("hidden"); // 空态无 Git 操作,隐藏顶部工具栏
   $("panel").classList.add("hidden");
-  await hideRefreshing();
+  if (!isSwitching()) await hideRefreshing(); // 切库期间由 endSwitchLoading 统一收起
   $("empty-state").classList.remove("hidden");
   if (showInit) {
     // 当前选中的不是 Git 仓库:简洁提示 + 仅保留初始化入口
@@ -145,7 +177,7 @@ export async function showEmpty(showInit) {
 export async function showPanel(st) {
   $("empty-state").classList.add("hidden");
   $("toolbar").classList.remove("hidden"); // 仓库面板恢复顶部工具栏
-  await hideRefreshing();
+  if (!isSwitching()) await hideRefreshing(); // 切库期间由 endSwitchLoading 统一收起
   $("panel").classList.remove("hidden");
   $("sec-history").classList.remove("hidden"); // 版本历史位于侧栏底部,仓库视图显示
 
@@ -817,11 +849,16 @@ function normalizeGitignore(text) {
 export function bindPanelEvents() {
   $("btn-diff-close").addEventListener("click", closeDiffPanel);
 
-  // 子模块提示条:一键切回父仓库,便于暂存/提交子模块指针改动
+  // 子模块提示条:一键切回父仓库,便于暂存/提交子模块指针改动。
+  // 父仓库路径已随本次刷新缓存,直接复用;仅在缓存缺失(极端时序)时兜底查询。
   $("btn-goto-parent").addEventListener("click", async () => {
     try {
-      const info = await invoke("git_submodule_parent_state", { repo });
-      if (info && info.parent) await switchRepo(info.parent);
+      let parent = lastSubmoduleParent && lastSubmoduleParent.parent;
+      if (!parent) {
+        const info = await invoke("git_submodule_parent_state", { repo });
+        parent = info && info.parent;
+      }
+      if (parent) await switchRepo(parent);
       else toast("未找到父仓库", false);
     } catch (e) { toast(String(e), false); }
   });

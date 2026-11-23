@@ -76,6 +76,36 @@ pub struct SubmoduleParentState {
     pub commits_ahead: i32,
 }
 
+/// 单个 worktree 的摘要(git worktree list --porcelain 的一项)
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct WorktreeEntry {
+    /// 工作区绝对路径
+    pub path: String,
+    /// 检出的分支名(分离 HEAD 时为 None)
+    pub branch: Option<String>,
+    /// HEAD oid
+    pub head: String,
+    /// 是否为主 worktree(其 .git 是目录;其余 worktree 的 .git 是指向 gitdir 的文件)
+    pub is_main: bool,
+}
+
+/// 某路径所属仓库的全部 worktree 关系。
+/// 从任意 worktree 执行 `git worktree list --porcelain` 都能拿到整个仓库的全部工作树。
+#[derive(Serialize, Clone, Default)]
+pub struct WorktreeInfo {
+    /// 当前路径是否为从属 worktree(linked worktree,而非主仓库)
+    pub is_linked: bool,
+    /// 主 worktree 的绝对路径
+    pub main_path: String,
+    /// 主 worktree 的项目名(目录名),供侧栏展示「来自 xxx」
+    pub main_name: String,
+    /// 当前仓库检出的分支(分离 HEAD 时为 None);不从 entries 按路径匹配,
+    /// 避免规范化路径形式不同(如 macOS /var 与 /private/var)导致取不到分支
+    pub current_branch: Option<String>,
+    /// 全部 worktree(主在前),含各自分支
+    pub entries: Vec<WorktreeEntry>,
+}
+
 /// 每个仓库一把互斥锁:同一仓库的 git 命令串行执行。
 /// 暂存/提交/回退等写操作会创建 .git/index.lock,两个 git 进程并发写时,
 /// 后者会误报"另一个 git 进程正在运行"。读命令也走同一把锁,避免读到
@@ -515,46 +545,67 @@ pub fn submodules(repo: &str) -> Vec<SubmoduleInfo> {
 }
 
 /// 子模块视角:读取父仓库是否已提交本子模块的 gitlink 改动。
-/// 用 `git rev-parse --show-superproject-working-tree` 找父仓库,再检查父仓库中
-/// 该子模块路径是否仍有暂存/未暂存的指针变更,并数出子模块领先的提交数。
+/// 检查父仓库中该子模块路径是否仍有暂存/未暂存的指针变更,并数出子模块领先的提交数。
 pub fn submodule_parent_state(repo: &str) -> SubmoduleParentState {
+    submodule_parent_state_hinted(repo, None, None)
+}
+
+/// 与 `submodule_parent_state` 等价,但允许调用方直接给出父仓库路径与子模块相对路径。
+/// 侧栏摘要已发现子模块并带有这两项信息(`SubmoduleInfo.parent/path`),切库时传入可
+/// 省掉 `rev-parse --show-superproject-working-tree`、`submodule status`、`.gitmodules`
+/// 解析与 `canonicalize` 等发现步骤——每次少跑 3 个 git 子进程,是父子仓库切换卡顿的
+/// 主要来源之一。无提示时(直接打开的子模块)回落到现场发现,行为与原先一致。
+pub fn submodule_parent_state_hinted(
+    repo: &str,
+    parent_hint: Option<&str>,
+    rel_hint: Option<&str>,
+) -> SubmoduleParentState {
     let mut out = SubmoduleParentState {
         committed: true,
         ..Default::default()
     };
-    let parent = match run_git(repo, &["rev-parse", "--show-superproject-working-tree"]) {
-        Ok(s) => s.trim().to_string(),
-        Err(_) => return out,
-    };
-    if parent.is_empty() {
-        return out; // 不是子模块
-    }
-    // 相对路径:在父仓库子模块列表中按绝对路径匹配当前仓库。
-    // 匹配成功后,父仓库路径取「当前仓库路径去掉相对路径后缀」——git 返回的
-    // superproject 路径是规范化的(如 macOS 上 /private/var/...),可能与本应用
-    // 保存的路径形式不同,派生出来的形式才能与侧栏项目路径精确对应。
-    let matched = submodules(&parent)
-        .into_iter()
-        .find(|s| same_path(&s.full_path, repo));
-    let (rel, parent_view) = match matched {
-        Some(s) => {
-            let trimmed = repo.trim_end_matches(|c| c == '/' || c == '\\');
-            let mut derived = None;
-            for sep in ['/', '\\'] {
-                let suffix = format!("{}{}", sep, s.path.replace('/', &sep.to_string()));
-                if let Some(p) = trimmed.strip_suffix(&suffix) {
-                    derived = Some(p.to_string());
-                    break;
-                }
-            }
-            (s.path, derived.unwrap_or_else(|| parent.clone()))
+    // 解析父仓库路径与子模块相对路径:优先用调用方提示,否则现场发现。
+    let (parent, rel, parent_view) = match (parent_hint, rel_hint) {
+        (Some(p), Some(r)) if !p.is_empty() && !r.is_empty() => {
+            (p.to_string(), r.to_string(), p.to_string())
         }
-        None => {
-            let fallback = std::path::Path::new(repo)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            (fallback, parent.clone())
+        _ => {
+            let parent = match run_git(repo, &["rev-parse", "--show-superproject-working-tree"]) {
+                Ok(s) => s.trim().to_string(),
+                Err(_) => return out,
+            };
+            if parent.is_empty() {
+                return out; // 不是子模块
+            }
+            // 相对路径:在父仓库子模块列表中按绝对路径匹配当前仓库。
+            // 匹配成功后,父仓库路径取「当前仓库路径去掉相对路径后缀」——git 返回的
+            // superproject 路径是规范化的(如 macOS 上 /private/var/...),可能与本应用
+            // 保存的路径形式不同,派生出来的形式才能与侧栏项目路径精确对应。
+            let matched = submodules(&parent)
+                .into_iter()
+                .find(|s| same_path(&s.full_path, repo));
+            let (rel, parent_view) = match matched {
+                Some(s) => {
+                    let trimmed = repo.trim_end_matches(|c| c == '/' || c == '\\');
+                    let mut derived = None;
+                    for sep in ['/', '\\'] {
+                        let suffix = format!("{}{}", sep, s.path.replace('/', &sep.to_string()));
+                        if let Some(p) = trimmed.strip_suffix(&suffix) {
+                            derived = Some(p.to_string());
+                            break;
+                        }
+                    }
+                    (s.path, derived.unwrap_or_else(|| parent.clone()))
+                }
+                None => {
+                    let fallback = std::path::Path::new(repo)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    (fallback, parent.clone())
+                }
+            };
+            (parent, rel, parent_view)
         }
     };
     out.parent = Some(parent_view);
@@ -598,6 +649,92 @@ fn same_path(a: &str, b: &str) -> bool {
         (Ok(x), Ok(y)) => x == y,
         _ => a == b,
     }
+}
+
+/// 把解析中的一条 worktree 记录收尾写入 entries;跳过已失效(路径不存在)的工作树。
+fn flush_worktree(
+    entries: &mut Vec<WorktreeEntry>,
+    path: &mut Option<String>,
+    head: &mut String,
+    branch: &mut Option<String>,
+) {
+    if let Some(p) = path.take() {
+        if std::path::Path::new(&p).is_dir() {
+            entries.push(WorktreeEntry {
+                path: p,
+                branch: branch.take(),
+                head: std::mem::take(head),
+                is_main: false,
+            });
+        } else {
+            // prunable / 已被删除的工作区:整条丢弃,避免把无效路径加入项目列表
+            *branch = None;
+            head.clear();
+        }
+    }
+}
+
+/// 读取当前路径所属仓库的全部 worktree。
+/// 主 worktree 判定:其 .git 是目录(linked worktree 的 .git 是文件),
+/// 兼容 .git 为文件的情况(worktree/submodule 中 rev-parse --git-dir 同样可用)。
+pub fn worktrees(repo: &str) -> WorktreeInfo {
+    let mut out = WorktreeInfo::default();
+    let raw = match run_git(repo, &["worktree", "list", "--porcelain"]) {
+        Ok(o) => o,
+        Err(_) => return out, // 非 git 仓库
+    };
+
+    let mut path: Option<String> = None;
+    let mut head = String::new();
+    let mut branch: Option<String> = None;
+    let mut entries: Vec<WorktreeEntry> = Vec::new();
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            flush_worktree(&mut entries, &mut path, &mut head, &mut branch);
+        } else if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(p.trim().to_string());
+        } else if let Some(h) = line.strip_prefix("HEAD ") {
+            head = h.trim().to_string();
+        } else if let Some(b) = line.strip_prefix("branch ") {
+            branch = Some(
+                b.strip_prefix("refs/heads/")
+                    .unwrap_or(b.trim())
+                    .to_string(),
+            );
+        }
+        // "detached" / "prunable ..." / "bare" 等行忽略(branch 保持 None)
+    }
+    flush_worktree(&mut entries, &mut path, &mut head, &mut branch);
+
+    // 主 worktree:porcelain 输出中 .git 为目录者;兜底取第一个条目
+    let mut main_idx = entries
+        .iter()
+        .position(|e| std::path::Path::new(&e.path).join(".git").is_dir());
+    if main_idx.is_none() && !entries.is_empty() {
+        main_idx = Some(0);
+    }
+    if let Some(i) = main_idx {
+        entries[i].is_main = true;
+        out.main_path = entries[i].path.clone();
+        out.main_name = std::path::Path::new(&entries[i].path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+    }
+    out.is_linked = !out.main_path.is_empty() && !same_path(repo, &out.main_path);
+    // 当前分支:优先取解析出的对应条目,兜底直接问当前仓库(兼容路径形式不一致)
+    out.current_branch = entries
+        .iter()
+        .find(|e| same_path(&e.path, repo))
+        .and_then(|e| e.branch.clone())
+        .or_else(|| {
+            run_git(repo, &["branch", "--show-current"])
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+    out.entries = entries;
+    out
 }
 
 /// 用 git diff --numstat 填充每个文件相对参照的增删行数。
@@ -1945,6 +2082,12 @@ mod tests {
         assert!(st.committed, "初始应已提交");
         assert!(!st.pointer_staged && !st.pointer_unstaged);
         assert_eq!(st.commits_ahead, 0);
+        // 快速路径:调用方已给出 parent/rel 时,结果与现场发现一致
+        let fast = submodule_parent_state_hinted(sub_s, Some(parent_s), Some("sub"));
+        assert_eq!(fast.parent.as_deref(), Some(parent_s));
+        assert_eq!(fast.rel_path, "sub");
+        assert!(fast.committed);
+        assert_eq!(fast.commits_ahead, 0);
 
         // 子模块产生新提交 → 父仓库指针未提交(未暂存)
         std::fs::write(sub.join("a.txt"), "two\n").unwrap();
@@ -1961,6 +2104,7 @@ mod tests {
         assert!(!st.committed);
         assert!(st.pointer_staged, "父仓库指针应已暂存");
         assert!(!st.pointer_unstaged);
+        assert!(submodule_parent_state_hinted(sub_s, Some(parent_s), Some("sub")).pointer_staged);
 
         // 父仓库提交指针 → 已提交
         run_git(parent_s, &["commit", "-qm", "update submodule pointer"]).unwrap();
@@ -1974,5 +2118,60 @@ mod tests {
         assert!(plain.parent.is_none());
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn detects_worktree_relationships() {
+        let base = temp_repo("worktree-main");
+        let r = base.to_str().unwrap();
+        // worktree add 需要一个初始提交
+        std::fs::write(base.join("README.md"), "init\n").unwrap();
+        stage_all(r).unwrap();
+        commit(r, "init").unwrap();
+
+        let linked = std::env::temp_dir().join(format!(
+            "ohmygitty-test-worktree-linked-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&linked);
+        let l = linked.to_str().unwrap();
+        run_git(r, &["worktree", "add", "-b", "feature-x", l]).unwrap();
+
+        // 从主仓库看:不是 linked,包含 2 个工作树,主仓库被正确标记
+        let from_main = worktrees(r);
+        assert!(!from_main.is_linked);
+        assert_eq!(from_main.entries.len(), 2, "{:?}", from_main.entries);
+        assert!(same_path(&from_main.main_path, r));
+        assert_eq!(
+            from_main.main_name,
+            base.file_name().unwrap().to_string_lossy().to_string()
+        );
+        assert_eq!(
+            from_main.entries.iter().filter(|e| e.is_main).count(),
+            1,
+            "应恰有一个主 worktree"
+        );
+        assert!(
+            from_main
+                .entries
+                .iter()
+                .any(|e| e.branch.as_deref() == Some("feature-x")),
+            "应解析出从属工作树的分支"
+        );
+
+        // 从从属工作树看:is_linked=true,且仍能拿到完整列表与主仓库路径
+        let from_linked = worktrees(l);
+        assert!(from_linked.is_linked);
+        assert_eq!(from_linked.entries.len(), 2);
+        assert!(same_path(&from_linked.main_path, r));
+
+        // 非仓库路径:返回空信息而非 panic
+        let empty = worktrees(std::env::temp_dir().to_str().unwrap());
+        assert!(empty.entries.is_empty());
+        assert!(!empty.is_linked);
+
+        run_git(r, &["worktree", "remove", l]).ok();
+        std::fs::remove_dir_all(&linked).ok();
+        std::fs::remove_dir_all(&base).ok();
     }
 }

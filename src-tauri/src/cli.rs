@@ -64,10 +64,8 @@ pub fn open_repo(app: &tauri::AppHandle, dir: &Path) -> bool {
     }
     let store = crate::config::SettingsStore::new(app);
     let mut settings = store.load();
-    let key = crate::normalize(&path);
-    if !settings.repos.iter().any(|p| crate::normalize(p) == key) {
-        settings.repos.push(path.clone());
-    }
+    // 从 worktree 中打开时,自动把同一仓库的其它 worktree 一并带入项目列表
+    crate::expand_repo_paths(&mut settings.repos, &path);
     settings.last_repo = Some(path.clone());
     if store.save(&settings).is_err() {
         return false;

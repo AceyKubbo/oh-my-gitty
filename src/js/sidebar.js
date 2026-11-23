@@ -1,7 +1,7 @@
 /* 侧栏:项目列表(渲染/拖拽排序/右键菜单/宽度模式) + 项目管理(打开/添加/克隆/移除/初始化)
    + 仓库摘要加载(loadRepos) + 后台 fetch + 仓库切换 */
 import { $, invoke, toast, setButtonLoading, repoAvatarColor, settings, repos, repo, view, setRepos, setRepo, setNumBadge } from "./state.js";
-import { refresh, showRefreshing } from "./panel.js";
+import { refresh, showRefreshing, beginSwitchLoading, endSwitchLoading } from "./panel.js";
 import { syncRunPanel, runningRepos } from "./run-panel.js";
 import { syncRepoFileWatcher } from "./file-watcher.js";
 import { refreshTip } from "./tooltip.js";
@@ -42,7 +42,7 @@ export function findRepoEntry(path) {
     if (normPath(r.path) === target) return r;
     for (const s of r.submodules || []) {
       if (normPath(s.full_path) === target) {
-        return { path: s.full_path, name: s.name, icon: null, parent: r.path, submodule: true };
+        return { path: s.full_path, name: s.name, icon: null, parent: r.path, submodule: true, rel_path: s.path };
       }
     }
   }
@@ -51,6 +51,29 @@ export function findRepoEntry(path) {
 
 const SUBMODULE_GIT_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0"/><path d="M8.5 18H14a4 4 0 0 0 4-4v0"/></svg>';
 const SUBMODULE_CARET_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+
+// worktree 标记:重叠方框表示「同一仓库的多个工作区」
+const WORKTREE_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="13" height="13" rx="1.5"/><path d="M8 21h10a3 3 0 0 0 3-3V8"/></svg>';
+
+// 计算 worktree 关系在侧栏的展示信息;非 worktree 仓库或只有一个工作树时返回 null。
+// 主仓库标出工作树数量,从属工作树标出自己的分支和来源主仓库。
+function worktreeDisplay(r) {
+  const wt = r.worktree;
+  if (!wt || !Array.isArray(wt.entries) || wt.entries.length < 2) return null;
+  const linked = !!wt.is_linked;
+  const branch = wt.current_branch || null;
+  const others = wt.entries.length - 1;
+  const mainName = wt.main_name || "主仓库";
+  return {
+    linked,
+    sub: linked
+      ? `↳ ${branch || "detached"} · ${mainName}`
+      : `主仓库 · ${others} 个工作树`,
+    tip: linked
+      ? `从属工作树 · 分支 ${branch || "分离 HEAD"} · 主仓库：${wt.main_path || mainName}`
+      : `主仓库 · ${others} 个工作树：${wt.entries.filter((e) => !e.is_main).map((e) => e.branch || "detached").join("、")}`,
+  };
+}
 
 /* ===== 项目管理 ===== */
 export async function openLocalRepo() {
@@ -154,12 +177,13 @@ export function syncSidebarVisibility() {
 /* ===== 后台 fetch ===== */
 // 后台静默 fetch:更新本地远程跟踪分支,让 push/pull 徽标与远程历史反映最新状态。
 // 失败静默(无远程/无网络/未配置凭据),不打断用户操作;完成后就地刷新当前仓库。
-export async function fetchRemote() {
-  if (!repo || fetching) return;
+export async function fetchRemote(targetRepo) {
+  // 可指定目标仓库:切库后延迟触发时,即使期间又切了库也不会把旧库数据刷到新界面。
+  const target = targetRepo || repo;
+  if (!target || fetching) return;
   fetching = true;
-  const target = repo;
   try {
-    const r = await invoke("git_fetch", { repo });
+    const r = await invoke("git_fetch", { repo: target });
     if (r && r.ok === false) return; // 无远程/无网络/认证失败等:静默忽略
     if (repo !== target) return;
     // fetch 后重读状态,更新 ahead/behind 徽标;总览视图下改刷摘要(总览行经 loadRepos 重渲染)
@@ -172,28 +196,35 @@ export async function fetchRemote() {
 /* ===== 仓库切换 ===== */
 export async function switchRepo(path) {
   if (path === repo && view === "repo") return;
-  const { leaveOverview } = await import("./dashboard.js"); // 从总览点进项目:恢复仓库级界面
-  leaveOverview();
-  setRepo(path);
-  settings.last_repo = path;
-  try { await invoke("repos_set_current", { path }); } catch (_) {}
-  // 目标是子模块时,若父项目分组处于收起态则自动展开,保证叶子高亮可见
-  const entry = findRepoEntry(path);
-  if (entry && entry.submodule && entry.parent && !expandedSet().has(entry.parent)) {
-    const set = expandedSet();
-    set.add(entry.parent);
-    settings.submodule_expanded = [...set];
-    invoke("settings_save", { settings }).catch(() => {});
-    renderRepoList(true);
+  // 一个整体加载态覆盖下面所有步骤;异常时也保证收起,不会把界面卡在 loading。
+  beginSwitchLoading();
+  try {
+    const { leaveOverview } = await import("./dashboard.js"); // 从总览点进项目:恢复仓库级界面
+    leaveOverview();
+    setRepo(path);
+    settings.last_repo = path;
+    try { await invoke("repos_set_current", { path }); } catch (_) {}
+    // 目标是子模块时,若父项目分组处于收起态则自动展开,保证叶子高亮可见
+    const entry = findRepoEntry(path);
+    if (entry && entry.submodule && entry.parent && !expandedSet().has(entry.parent)) {
+      const set = expandedSet();
+      set.add(entry.parent);
+      settings.submodule_expanded = [...set];
+      invoke("settings_save", { settings }).catch(() => {});
+      renderRepoList(true);
+    }
+    updateSidebarActive(path); // 只切高亮与滚动,不重建列表(重建会让全部状态行闪烁)
+    await refresh();
+    await syncRepoFileWatcher();
+    syncRunPanel(); // 切到新仓库:回填其运行命令、刷新日志与运行态
+    // 提交面板跟随项目:切走隐藏,切回恢复(动态 import 断开与 git-ops 的循环依赖)
+    import("./git-ops.js").then(({ syncCommitPop }) => syncCommitPop()).catch(() => {});
+    // 后台核对远程状态延后触发:避免 fetch + 二次 refresh 与切库本身的 git 进程
+    // 抢占同一仓库锁,也不会在加载动画刚消失时立刻引起一次整屏重绘。
+    setTimeout(() => fetchRemote(path), 600);
+  } finally {
+    await endSwitchLoading();
   }
-  updateSidebarActive(path); // 只切高亮与滚动,不重建列表(重建会让全部状态行闪烁)
-  showRefreshing();
-  await refresh();
-  await syncRepoFileWatcher();
-  fetchRemote(); // 切到新仓库后台核对远程状态
-  syncRunPanel(); // 切到新仓库:回填其运行命令、刷新日志与运行态
-  // 提交面板跟随项目:切走隐藏,切回恢复(动态 import 断开与 git-ops 的循环依赖)
-  import("./git-ops.js").then(({ syncCommitPop }) => syncCommitPop()).catch(() => {});
 }
 
 export async function removeRepo(path) {
@@ -289,6 +320,22 @@ export function renderRepoList(keepScroll = false) {
     name.className = "repo-name";
     name.textContent = r.name;
     info.appendChild(name);
+
+    // worktree 关系:图标角标 + 名称下方的关系副标题(简洁模式仅保留角标)
+    const wtInfo = worktreeDisplay(r);
+    if (wtInfo) {
+      const wbadge = document.createElement("span");
+      wbadge.className = "worktree-badge" + (wtInfo.linked ? " linked" : " main");
+      wbadge.innerHTML = WORKTREE_SVG;
+      wbadge.dataset.tip = wtInfo.tip;
+      ic.appendChild(wbadge);
+      const sub = document.createElement("span");
+      sub.className = "repo-sublabel";
+      sub.textContent = wtInfo.sub;
+      sub.dataset.tip = wtInfo.tip;
+      info.appendChild(sub);
+      li.classList.add(wtInfo.linked ? "is-worktree" : "has-worktrees");
+    }
 
     // 运行中项目:行尾静态绿点(隐藏用 .hidden 占位,运行态变化由 updateRepoRunDots 就地切换)
     const dot = document.createElement("span");

@@ -66,6 +66,8 @@ struct RepoSummary {
     category: String,
     /// 直接子模块(侧栏可折叠叶子节点;无子模块时为空)
     submodules: Vec<git::SubmoduleInfo>,
+    /// worktree 关系(非 worktree 仓库时 entries 为空)
+    worktree: git::WorktreeInfo,
 }
 
 /// 图标搜索目录(相对项目根,按优先级;空串为根目录)
@@ -363,6 +365,7 @@ fn summarize(path: &str) -> RepoSummary {
         icon: icon_cached(path),
         category: repo_category(path).to_string(),
         submodules: git::submodules(path),
+        worktree: git::worktrees(path),
     }
 }
 
@@ -387,6 +390,63 @@ fn icon_cached(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_repo_paths_groups_worktrees_next_to_main() {
+        let mut repos = vec!["/A".to_string(), "/main".to_string(), "/B".to_string()];
+        let ordered = vec![
+            "/main".to_string(),
+            "/main-wt1".to_string(),
+            "/main-wt2".to_string(),
+        ];
+        merge_repo_paths(&mut repos, &ordered);
+        assert_eq!(
+            repos,
+            vec!["/A", "/main", "/main-wt1", "/main-wt2", "/B"],
+            "从属 worktree 应紧随主仓库,且不影响其它项目顺序"
+        );
+
+        // 重复合并不会新增,也不会打乱已有顺序
+        merge_repo_paths(&mut repos, &ordered);
+        assert_eq!(repos.len(), 5);
+    }
+
+    #[test]
+    fn expand_repo_paths_auto_imports_all_worktrees() {
+        let base = std::env::temp_dir().join(format!("ohmygitty-expand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let r = base.to_str().unwrap();
+        git::run_git(r, &["init", "-q"]).unwrap();
+        git::run_git(r, &["config", "user.email", "t@e.com"]).unwrap();
+        git::run_git(r, &["config", "user.name", "t"]).unwrap();
+        std::fs::write(base.join("a.txt"), "x").unwrap();
+        git::stage_all(r).unwrap();
+        git::commit(r, "init").unwrap();
+
+        let linked = std::env::temp_dir().join(format!("ohmygitty-expand-wt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&linked);
+        let l = linked.to_str().unwrap();
+        git::run_git(r, &["worktree", "add", "-b", "dev", l]).unwrap();
+
+        let mut repos = vec!["/unrelated".to_string()];
+        expand_repo_paths(&mut repos, r);
+        assert_eq!(repos.len(), 3, "主仓库与从属 worktree 都应被加入: {repos:?}");
+        assert!(repos.iter().any(|p| path_key(p) == path_key(r)));
+        assert!(repos.iter().any(|p| path_key(p) == path_key(l)));
+        // 主仓库在前、worktree 紧随其后
+        let main_i = repos.iter().position(|p| path_key(p) == path_key(r)).unwrap();
+        let wt_i = repos.iter().position(|p| path_key(p) == path_key(l)).unwrap();
+        assert_eq!(wt_i, main_i + 1);
+
+        // 重复调用幂等
+        expand_repo_paths(&mut repos, r);
+        assert_eq!(repos.len(), 3);
+
+        git::run_git(r, &["worktree", "remove", l]).ok();
+        std::fs::remove_dir_all(&linked).ok();
+        std::fs::remove_dir_all(&base).ok();
+    }
 
     #[test]
     fn normalizes_platform_paths_for_repo_identity() {
@@ -728,15 +788,14 @@ async fn repos_code_volume(repos: Vec<String>, since: i64) -> CodeVolumeSummary 
 fn repos_add(app: tauri::AppHandle, path: String) -> Result<RepoAddResult, String> {
     let store = SettingsStore::new(&app);
     let mut s = store.load();
-    let key = normalize(&path);
-    let existing = s.repos.iter().find(|p| normalize(p) == key).cloned();
-    let (stored_path, added) = if let Some(existing) = existing {
-        (existing, false)
-    } else {
-        s.repos.push(path.clone());
-        store.save(&s)?;
-        (path, true)
-    };
+    let key = path_key(&path);
+    let existing = s.repos.iter().find(|p| path_key(p) == key).cloned();
+    let added = existing.is_none();
+    let stored_path = existing.unwrap_or(path);
+    // 自动带入同一仓库的其它 worktree(主仓库在前),一次落盘。
+    // 即便项目已存在也重跑(例如外部新建了 worktree 后重新打开该项目)。
+    expand_repo_paths(&mut s.repos, &stored_path);
+    store.save(&s)?;
     Ok(RepoAddResult {
         repos: s.repos,
         path: stored_path,
@@ -749,6 +808,23 @@ struct RepoAddResult {
     repos: Vec<String>,
     path: String,
     added: bool,
+}
+
+/// 启动时同步:把配置中已有项目所属的全部 worktree 补齐进项目列表。
+/// 覆盖「升级后首次打开」「在外部新建 worktree 后重启」等场景;返回最新项目列表。
+#[tauri::command]
+fn repos_sync_worktrees(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let store = SettingsStore::new(&app);
+    let mut s = store.load();
+    let before = s.repos.clone();
+    let paths = before.clone();
+    for p in &paths {
+        expand_repo_paths(&mut s.repos, p);
+    }
+    if s.repos != before {
+        store.save(&s)?;
+    }
+    Ok(s.repos)
 }
 
 /// 目录扫描时跳过的子目录(依赖缓存/构建产物,体积大且不可能含独立仓库;隐藏目录另行整体跳过)
@@ -780,14 +856,28 @@ async fn repos_scan_dir(
             .map_err(|e| format!("目录不可访问： {e}"))?;
         let mut found = Vec::new();
         scan_repos(&root, 0, &mut found);
+        // 每个已发现仓库都自动带入其全部 worktree(可能在扫描目录之外),主仓库在前
+        let mut candidates: Vec<String> = Vec::new();
+        for p in &found {
+            let wt = git::worktrees(p);
+            let mut group: Vec<String> = wt.entries.into_iter().map(|e| e.path).collect();
+            if group.is_empty() {
+                group.push(p.clone());
+            }
+            for g in group {
+                if !candidates.iter().any(|x| path_key(x) == path_key(&g)) {
+                    candidates.push(g);
+                }
+            }
+        }
 
         let store = SettingsStore::new(&app);
         let mut s = store.load();
         let mut known: std::collections::HashSet<String> =
-            s.repos.iter().map(|p| normalize(p)).collect();
+            s.repos.iter().map(|p| path_key(p)).collect();
         let mut added = Vec::new();
-        for p in found {
-            let key = normalize(&p);
+        for p in candidates {
+            let key = path_key(&p);
             if !known.contains(&key) {
                 known.insert(key);
                 s.repos.push(p.clone());
@@ -839,6 +929,64 @@ pub(crate) fn normalize(p: &str) -> String {
         normalized.to_lowercase()
     } else {
         normalized
+    }
+}
+
+/// 路径比较键:能规范化时按规范化结果比较(兼容 macOS /var→/private/var、
+/// worktree 返回的规范路径与用户选择路径形式不同的情况),否则退回普通归一化。
+fn path_key(p: &str) -> String {
+    match std::fs::canonicalize(p) {
+        Ok(c) => {
+            let s = c.to_string_lossy();
+            let s = s
+                .strip_prefix(r"\\?\UNC\")
+                .map(|r| format!(r"\\{r}"))
+                .or_else(|| s.strip_prefix(r"\\?\").map(|r| r.to_string()))
+                .unwrap_or_else(|| s.to_string());
+            normalize(&s)
+        }
+        Err(_) => normalize(p),
+    }
+}
+
+/// 把某个路径所属仓库的全部 worktree 合并进项目列表。
+/// 主 worktree 在前、从属 worktree 紧随其后,便于侧栏按关系相邻展示;
+/// 已存在的路径不重复添加,新路径插到同组已知路径之后(保持用户原有顺序)。
+pub(crate) fn expand_repo_paths(repos: &mut Vec<String>, path: &str) {
+    let wt = git::worktrees(path);
+    let mut ordered: Vec<String> = Vec::new();
+    if !wt.main_path.is_empty() {
+        ordered.push(wt.main_path.clone());
+    }
+    for e in &wt.entries {
+        if ordered.iter().any(|p| path_key(p) == path_key(&e.path)) {
+            continue;
+        }
+        ordered.push(e.path.clone());
+    }
+    if ordered.is_empty() {
+        ordered.push(path.to_string());
+    }
+    merge_repo_paths(repos, &ordered);
+}
+
+/// 按 ordered 顺序把路径合并进 repos:已存在项保持原位,新项插到同组前驱之后。
+fn merge_repo_paths(repos: &mut Vec<String>, ordered: &[String]) {
+    for (i, p) in ordered.iter().enumerate() {
+        let key = path_key(p);
+        if repos.iter().any(|x| path_key(x) == key) {
+            continue;
+        }
+        let mut insert_at = None;
+        for prev in &ordered[..i] {
+            if let Some(idx) = repos.iter().position(|x| path_key(x) == path_key(prev)) {
+                insert_at = Some(idx + 1);
+            }
+        }
+        match insert_at {
+            Some(at) => repos.insert(at, p.clone()),
+            None => repos.push(p.clone()),
+        }
     }
 }
 
@@ -1128,13 +1276,21 @@ struct RefreshResult {
     history: History,
     /// 进行中的 git 操作(合并/挑拣/回退),供前端展示「继续/终止」提示条
     operation: String,
+    /// 当前仓库为子模块时父仓库的 gitlink 指针状态。合并进本次刷新,前端不再为
+    /// 提示条单独发一次 `git_submodule_parent_state` 请求(切库时少一次往返 + 多个 git 进程)。
+    submodule_parent: git::SubmoduleParentState,
 }
 
-/// 合并 status + history 的单次刷新命令:1 次 status 即拿到 branch/upstream/ahead/behind/head,
-/// 再据此只跑必要的 log,省掉 git_history 里重复的 head_hash/upstream/ahead/behind 进程。
-/// 切换仓库的 git 进程数从最多 7 次降到 3 次(无上游 2-3 次),显著降低 Windows 切换延迟。
+/// 合并 status + history + 子模块父状态 + 进行中操作的单次刷新命令:
+/// 1 次 status 拿到 branch/upstream/ahead/behind/head,再并行跑必要的 log、
+/// 子模块指针探测与操作状态查询。切库时前端只等一次命令返回,不再串行追加
+/// `git_submodule_parent_state`(后者原本要再跑 3~6 个 git 子进程),显著降低切库延迟。
 #[tauri::command]
-async fn git_refresh(repo: String) -> RefreshResult {
+async fn git_refresh(
+    repo: String,
+    parent: Option<String>,
+    rel_path: Option<String>,
+) -> RefreshResult {
     use tauri::async_runtime::spawn_blocking;
     let r0 = repo.clone();
     let st = spawn_blocking(move || git::status(&r0))
@@ -1146,6 +1302,7 @@ async fn git_refresh(repo: String) -> RefreshResult {
             status: st,
             history: History::default(),
             operation: "none".into(),
+            submodule_parent: git::SubmoduleParentState::default(),
         };
     }
 
@@ -1157,6 +1314,15 @@ async fn git_refresh(repo: String) -> RefreshResult {
         .or_else(|| git::first_remote_branch(&repo));
     let ahead = st.ahead;
     let behind = st.behind;
+
+    // 子模块父状态与进行中操作与 log 并行执行:
+    // 不再在 status/log 之后串行追加探测,也不占用 async runtime 线程。
+    let r_sub = repo.clone();
+    let sub_job = spawn_blocking(move || {
+        git::submodule_parent_state_hinted(&r_sub, parent.as_deref(), rel_path.as_deref())
+    });
+    let r_op = repo.clone();
+    let op_job = spawn_blocking(move || git::operation_state(&r_op).to_string());
 
     let (commits, remote) = match remote_name {
         Some(name) => {
@@ -1195,7 +1361,8 @@ async fn git_refresh(repo: String) -> RefreshResult {
             commits,
             remote,
         },
-        operation: git::operation_state(&repo).to_string(),
+        operation: op_job.await.unwrap_or_else(|_| "none".into()),
+        submodule_parent: sub_job.await.unwrap_or_default(),
     }
 }
 
@@ -1974,6 +2141,7 @@ pub fn run() {
             repos_activity,
             repos_code_volume,
             repos_add,
+            repos_sync_worktrees,
             repos_scan_dir,
             repos_remove,
             repos_clear,

@@ -653,6 +653,24 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 /* 侧栏收起(简洁轨道)时子模块节点与展开按钮都不显示 */
 #sidebar.collapsed .submodule-item, #sidebar.collapsed .submodule-toggle { display: none; }
 
+/* ===== worktree:同一仓库的多个工作树关系标记 ===== */
+/* 图标右下角角标(左上角留给更改数角标);主仓库绿、从属工作树蓝 */
+.worktree-badge {
+  position: absolute; right: -5px; bottom: -3px;
+  width: 15px; height: 15px; display: flex; align-items: center; justify-content: center;
+  background: var(--panel); border-radius: 3px; color: var(--status-blue); z-index: 1;
+}
+.worktree-badge.main { color: var(--status-remote); }
+/* 名称下方的关系副标题:从属工作树显示分支与来源主仓库,主仓库显示工作树数量 */
+.repo-sublabel {
+  font-size: 10px; color: var(--text-dim); line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.repo-item.is-worktree .repo-name { color: var(--text-dim); }
+.repo-item.is-worktree.active .repo-name { color: var(--accent-bright); }
+/* 简洁模式仍保留角标(否则无法区分 worktree),仅隐藏副标题 */
+#sidebar.collapsed .repo-sublabel { display: none; }
+
 .sidebar-footer {
   display: flex; align-items: center; gap: 2px;
   /* 水平内边距与侧栏头部(12px)一致,按钮不贴边;收起态(48px 轨道)下也接近居中 */
@@ -848,9 +866,11 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 切换仓库时的加载占位:绝对定位填满 #main,避免 height:100% 在 flex/滚动容器下不撑开 */
-.state-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+/* 切库整体加载占位:绝对定位填满 #main,避免 height:100% 在 flex/滚动容器下不撑开。
+   spinner + 文案整体居中,文案作为「加载标签」明确告知当前处于切库过程中。 */
+.state-loading { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
 .state-loading .spinner { width: 28px; height: 28px; border-width: 3px; } /* 线宽随尺寸放大保持比例 */
+.state-loading .loading-label { font-size: 13px; color: var(--text-dim); letter-spacing: .5px; user-select: none; -webkit-user-select: none; }
 
 /* ===== 历史(单列时间线) ===== */
 .history-list { list-style: none; padding: 4px 0 6px; }
