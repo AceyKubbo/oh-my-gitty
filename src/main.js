@@ -30,13 +30,17 @@ async function init() {
   // 主题色与明暗模式正交:旧配置无 accent 字段时回落默认紫色
   applyAccent(settings.accent || DEFAULT_ACCENT);
   applyUiScale();
-  // 旧配置迁移:last_repo 不在列表时补进列表
-  if (settings.last_repo && !settings.repos.includes(settings.last_repo)) {
-    settings.repos.push(settings.last_repo);
+  // 旧配置迁移:last_repo 不在列表时补进列表。
+  // 子模块路径是父项目的叶子节点(位于某个已登记项目目录内),不作为独立顶层项目加入。
+  const np = (p) => String(p || "").replace(/\/+$/, "");
+  const last = settings.last_repo;
+  const nested = !!last && settings.repos.some((p) => np(last).startsWith(np(p) + "/"));
+  if (last && !settings.repos.includes(last) && !nested) {
+    settings.repos.push(last);
     try { await invoke("settings_save", { settings }); } catch (_) {}
   }
-  setRepo(settings.last_repo && settings.repos.includes(settings.last_repo)
-    ? settings.last_repo
+  setRepo(last && (settings.repos.includes(last) || nested)
+    ? last
     : (settings.repos[0] || null));
 
   // 恢复侧栏宽度;简洁/全面展示由宽度自动决定

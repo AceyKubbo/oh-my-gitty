@@ -240,6 +240,18 @@
         </div>
 
         <div id="panel" class="hidden">
+          <!-- 子模块视图:父仓库是否已提交本子模块的指针(gitlink)改动 -->
+          <div class="submodule-banner hidden" id="sec-submodule">
+            <span class="submodule-banner-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0"/><path d="M8.5 18H14a4 4 0 0 0 4-4v0"/></svg>
+            </span>
+            <div class="submodule-banner-body">
+              <div class="submodule-banner-title">子模块 · <span id="submodule-parent-name"></span></div>
+              <div class="submodule-banner-status" id="submodule-parent-status"></div>
+            </div>
+            <button id="btn-goto-parent" class="mini-btn" title="切换到父仓库以提交指针改动">父仓库</button>
+          </div>
+
           <div class="section" id="sec-conflicts">
             <button class="section-head" data-target="conflict-list">
               <span class="caret"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>

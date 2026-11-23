@@ -16,6 +16,42 @@ let dragState = null; // pointerdown 待定状态(移动超过阈值前不视为
 let dragGhost = null; // 跟随指针的拖拽缩略图(克隆被拖项)
 let suppressClick = false; // 拖拽结束后抑制一次合成 click,避免误切仓库
 
+/* ===== 子模块树(父项目可折叠,子模块为叶子节点) ===== */
+const normPath = (p) => String(p || "").replace(/\/+$/, ""); // 路径末尾斜杠归一,便于比较
+
+// 已展开的父项目集合(持久化在 settings.submodule_expanded)
+function expandedSet() {
+  if (!Array.isArray(settings.submodule_expanded)) settings.submodule_expanded = [];
+  return new Set(settings.submodule_expanded);
+}
+
+function toggleSubmoduleGroup(parentPath) {
+  const set = expandedSet();
+  if (set.has(parentPath)) set.delete(parentPath);
+  else set.add(parentPath);
+  settings.submodule_expanded = [...set];
+  invoke("settings_save", { settings }).catch(() => {});
+  renderRepoList(true); // 保持滚动位置:仅展开/折叠,不跳动
+}
+
+// 按路径查找侧栏条目:顶层项目本身,或其子模块叶子(标题栏/高亮用)
+export function findRepoEntry(path) {
+  if (!path) return null;
+  const target = normPath(path);
+  for (const r of repos) {
+    if (normPath(r.path) === target) return r;
+    for (const s of r.submodules || []) {
+      if (normPath(s.full_path) === target) {
+        return { path: s.full_path, name: s.name, icon: null, parent: r.path, submodule: true };
+      }
+    }
+  }
+  return null;
+}
+
+const SUBMODULE_GIT_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0"/><path d="M8.5 18H14a4 4 0 0 0 4-4v0"/></svg>';
+const SUBMODULE_CARET_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+
 /* ===== 项目管理 ===== */
 export async function openLocalRepo() {
   const dir = await invoke("pick_folder");
@@ -141,6 +177,15 @@ export async function switchRepo(path) {
   setRepo(path);
   settings.last_repo = path;
   try { await invoke("repos_set_current", { path }); } catch (_) {}
+  // 目标是子模块时,若父项目分组处于收起态则自动展开,保证叶子高亮可见
+  const entry = findRepoEntry(path);
+  if (entry && entry.submodule && entry.parent && !expandedSet().has(entry.parent)) {
+    const set = expandedSet();
+    set.add(entry.parent);
+    settings.submodule_expanded = [...set];
+    invoke("settings_save", { settings }).catch(() => {});
+    renderRepoList(true);
+  }
   updateSidebarActive(path); // 只切高亮与滚动,不重建列表(重建会让全部状态行闪烁)
   showRefreshing();
   await refresh();
@@ -205,9 +250,11 @@ export function renderRepoList(keepScroll = false) {
   for (const r of list) {
     const li = document.createElement("li");
     // 总览视图下不标记任何项目为选中(选中态属于「总览」入口),避免重渲染时残留旧高亮
-    li.className = "repo-item" + (view === "repo" && r.path === repo ? " active" : "");
+    li.className = "repo-item" + (view === "repo" && normPath(r.path) === normPath(repo) ? " active" : "");
     li.title = r.is_repo ? r.path : r.path + " · 不是 Git 仓库";
     li.dataset.path = r.path; // 拖拽落点定位用
+    const subs = r.submodules || [];
+    const expanded = subs.length > 0 && expandedSet().has(r.path);
 
     const ic = document.createElement("span");
     ic.className = "repo-icon-wrap";
@@ -249,6 +296,17 @@ export function renderRepoList(keepScroll = false) {
     dot.title = "运行中";
 
     li.append(ic, info, dot);
+    // 有子模块:行尾加展开/折叠按钮(点击不切换仓库)
+    if (subs.length > 0) {
+      li.classList.add("has-submodules");
+      const tg = document.createElement("button");
+      tg.className = "submodule-toggle" + (expanded ? " open" : "");
+      tg.type = "button";
+      tg.title = `${expanded ? "收起" : "展开"} ${subs.length} 个子模块`;
+      tg.innerHTML = SUBMODULE_CARET_SVG;
+      tg.addEventListener("click", (e) => { e.stopPropagation(); toggleSubmoduleGroup(r.path); });
+      li.appendChild(tg);
+    }
     li.addEventListener("click", () => {
       if (suppressClick) { suppressClick = false; return; } // 拖拽刚结束:吞掉合成 click
       switchRepo(r.path);
@@ -265,6 +323,38 @@ export function renderRepoList(keepScroll = false) {
       dragState = { path: r.path, li, x: e.clientX, y: e.clientY };
     });
     ul.appendChild(li);
+    // 展开态:子模块作为叶子节点跟在父项目下方,点击切换到该子模块的 Git 仓库
+    if (expanded) {
+      for (const s of subs) {
+        const leaf = document.createElement("li");
+        leaf.className = "repo-item submodule-item" + (view === "repo" && normPath(s.full_path) === normPath(repo) ? " active" : "");
+        leaf.dataset.path = s.full_path;
+        leaf.dataset.submodule = "1";
+        leaf.title = s.full_path + (s.initialized ? "" : " · 未初始化");
+        const gi = document.createElement("span");
+        gi.className = "submodule-git-icon";
+        gi.innerHTML = SUBMODULE_GIT_SVG;
+        const si = document.createElement("div");
+        si.className = "repo-info";
+        const sn = document.createElement("span");
+        sn.className = "repo-name";
+        sn.textContent = s.name || s.path;
+        si.appendChild(sn);
+        leaf.append(gi, si);
+        // 父仓库指针落后于子模块('+'=有新提交未同步,'U'=冲突):橙色提示点
+        if (s.state === "+" || s.state === "U") {
+          const sync = document.createElement("span");
+          sync.className = "submodule-sync-dot";
+          sync.title = "子模块有改动尚未在父仓库提交";
+          leaf.appendChild(sync);
+        }
+        leaf.addEventListener("click", () => {
+          if (!s.initialized) { toast("该子模块尚未初始化，请先在终端执行 git submodule update --init", false); return; }
+          switchRepo(s.full_path);
+        });
+        ul.appendChild(leaf);
+      }
+    }
   }
   ul.scrollTop = scrollTop; // 恢复原滚动位置(整表重建会重置)
   // 拖拽重排(keepScroll):严格停在原位置,不做当前项滚动(选中项不在视口时会拉走视图)
@@ -301,7 +391,7 @@ export function applySidebarMode() {
 // 切换仓库时只更新高亮与滚动,不重建列表
 export function updateSidebarActive(path) {
   for (const li of $("repo-list").children) {
-    li.classList.toggle("active", li.dataset.path === path);
+    li.classList.toggle("active", normPath(li.dataset.path) === normPath(path));
   }
   const active = $("repo-list").querySelector(".repo-item.active");
   if (active) active.scrollIntoView({ block: "nearest" });
@@ -310,7 +400,7 @@ export function updateSidebarActive(path) {
 // 顶部标题栏:当前项目图标 + 名称(数据复用侧栏仓库摘要,无需额外请求)
 export function updateProjectHeader() {
   const hdr = $("project-header");
-  const cur = repos.find((r) => r.path === repo);
+  const cur = findRepoEntry(repo); // 顶层项目或其子模块叶子
   if (!cur) { hdr.classList.add("hidden"); return; }
   hdr.classList.remove("hidden");
   const wrap = $("proj-icon-wrap");
@@ -364,7 +454,8 @@ function clearDropIndicators() {
 
 // 根据纵坐标定位指针下的项目元素
 function repoItemAtY(y) {
-  for (const it of $("repo-list").querySelectorAll(".repo-item")) {
+  // 子模块叶子不参与顶层项目的拖拽排序
+  for (const it of $("repo-list").querySelectorAll(".repo-item:not(.submodule-item)")) {
     const r = it.getBoundingClientRect();
     if (y >= r.top && y <= r.bottom) return it;
   }

@@ -42,6 +42,40 @@ pub struct RepoStatus {
     pub conflicts: Vec<FileEntry>,
 }
 
+/// 子模块摘要(侧栏父项目下的可折叠叶子节点)
+#[derive(Serialize, Clone, Default)]
+pub struct SubmoduleInfo {
+    /// .gitmodules 中配置的名字
+    pub name: String,
+    /// 相对父仓库的路径
+    pub path: String,
+    /// 工作区绝对路径(父仓库目录 + path)
+    pub full_path: String,
+    /// `git submodule status` 中记录的提交 oid
+    pub head: String,
+    /// 状态字符:' '(已同步) / '+'(子模块有新提交未同步到父仓库) / '-'(未初始化) / 'U'(冲突)
+    pub state: String,
+    /// 是否已初始化(工作区存在归属 .git)
+    pub initialized: bool,
+}
+
+/// 子模块视角下父仓库的指针(gitlink)状态:父仓库是否已把本子模块的当前提交提交进去。
+#[derive(Serialize, Clone, Default)]
+pub struct SubmoduleParentState {
+    /// 父仓库(superproject)工作区路径;当前仓库不是子模块时为 None
+    pub parent: Option<String>,
+    /// 子模块相对父仓库的路径
+    pub rel_path: String,
+    /// 父仓库索引中存在该子模块指针改动(已暂存)
+    pub pointer_staged: bool,
+    /// 父仓库工作区中存在该子模块指针改动(未暂存)
+    pub pointer_unstaged: bool,
+    /// 父仓库是否已提交当前子模块指针(true=父仓库没有待提交的指针改动)
+    pub committed: bool,
+    /// 子模块中领先于父仓库所记录指针的提交数
+    pub commits_ahead: i32,
+}
+
 /// 每个仓库一把互斥锁:同一仓库的 git 命令串行执行。
 /// 暂存/提交/回退等写操作会创建 .git/index.lock,两个 git 进程并发写时,
 /// 后者会误报"另一个 git 进程正在运行"。读命令也走同一把锁,避免读到
@@ -393,6 +427,177 @@ pub fn status(repo: &str) -> RepoStatus {
         }
     }
     st
+}
+
+/// 列出仓库的直接子模块。
+/// `git submodule status` 给出已登记子模块及其当前状态(行首字符),
+/// `.gitmodules` 提供每个路径对应的配置名。嵌套子模块不递归,只取直接子节点。
+pub fn submodules(repo: &str) -> Vec<SubmoduleInfo> {
+    let status_out = match run_git(repo, &["submodule", "status"]) {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    // path -> name: git config --file <repo>/.gitmodules --get-regexp ^submodule\..*\.path$
+    let mut names: HashMap<String, String> = HashMap::new();
+    let gm = std::path::Path::new(repo).join(".gitmodules");
+    if gm.exists() {
+        let gm_arg = gm.to_string_lossy().to_string();
+        if let Ok(cfg) = run_git(
+            repo,
+            &[
+                "config",
+                "--file",
+                &gm_arg,
+                "--get-regexp",
+                r"^submodule\..*\.path$",
+            ],
+        ) {
+            for line in cfg.lines() {
+                let mut parts = line.splitn(2, ' ');
+                let key = parts.next().unwrap_or("");
+                let path = parts.next().unwrap_or("").trim().to_string();
+                if let Some(name) = key
+                    .strip_prefix("submodule.")
+                    .and_then(|s| s.strip_suffix(".path"))
+                {
+                    names.insert(path, name.to_string());
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for line in status_out.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        // 行首状态字符后紧跟 oid(无空格):`<state><oid> <path> (<desc>)`
+        let mut chars = line.chars();
+        let first = chars.next().unwrap_or(' ');
+        let (state, rest) = if matches!(first, '+' | '-' | 'U') {
+            (first.to_string(), chars.as_str())
+        } else {
+            (" ".to_string(), line.trim_start())
+        };
+        let mut parts = rest.splitn(2, char::is_whitespace);
+        let oid_tok = parts.next().unwrap_or("");
+        let head: String = oid_tok
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect();
+        // 行尾可能带 ` (<描述>)`,去掉它只留路径(路径中若含括号,取最后一次出现的 ` (`)
+        let raw_path = parts.next().unwrap_or("").trim();
+        let raw_path = raw_path
+            .rsplit_once(" (")
+            .map(|(p, _)| p)
+            .unwrap_or(raw_path);
+        let path = unquote(raw_path.trim());
+        if path.is_empty() {
+            continue;
+        }
+        let full = std::path::Path::new(repo).join(&path);
+        out.push(SubmoduleInfo {
+            name: names.get(&path).cloned().unwrap_or_else(|| {
+                std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone())
+            }),
+            full_path: full.to_string_lossy().to_string(),
+            initialized: state != "-" && full.join(".git").exists(),
+            path,
+            head,
+            state,
+        });
+    }
+    out
+}
+
+/// 子模块视角:读取父仓库是否已提交本子模块的 gitlink 改动。
+/// 用 `git rev-parse --show-superproject-working-tree` 找父仓库,再检查父仓库中
+/// 该子模块路径是否仍有暂存/未暂存的指针变更,并数出子模块领先的提交数。
+pub fn submodule_parent_state(repo: &str) -> SubmoduleParentState {
+    let mut out = SubmoduleParentState {
+        committed: true,
+        ..Default::default()
+    };
+    let parent = match run_git(repo, &["rev-parse", "--show-superproject-working-tree"]) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => return out,
+    };
+    if parent.is_empty() {
+        return out; // 不是子模块
+    }
+    // 相对路径:在父仓库子模块列表中按绝对路径匹配当前仓库。
+    // 匹配成功后,父仓库路径取「当前仓库路径去掉相对路径后缀」——git 返回的
+    // superproject 路径是规范化的(如 macOS 上 /private/var/...),可能与本应用
+    // 保存的路径形式不同,派生出来的形式才能与侧栏项目路径精确对应。
+    let matched = submodules(&parent)
+        .into_iter()
+        .find(|s| same_path(&s.full_path, repo));
+    let (rel, parent_view) = match matched {
+        Some(s) => {
+            let trimmed = repo.trim_end_matches(|c| c == '/' || c == '\\');
+            let mut derived = None;
+            for sep in ['/', '\\'] {
+                let suffix = format!("{}{}", sep, s.path.replace('/', &sep.to_string()));
+                if let Some(p) = trimmed.strip_suffix(&suffix) {
+                    derived = Some(p.to_string());
+                    break;
+                }
+            }
+            (s.path, derived.unwrap_or_else(|| parent.clone()))
+        }
+        None => {
+            let fallback = std::path::Path::new(repo)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            (fallback, parent.clone())
+        }
+    };
+    out.parent = Some(parent_view);
+    out.rel_path = rel.clone();
+
+    // 父仓库 status --porcelain -- <rel>:X=索引状态,Y=工作区状态
+    if rel.is_empty() {
+        return out;
+    }
+    if let Ok(s) = run_git(&parent, &["status", "--porcelain", "--", &rel]) {
+        for line in s.lines() {
+            let x = line.chars().next().unwrap_or(' ');
+            let y = line.chars().nth(1).unwrap_or(' ');
+            if x != ' ' && x != '?' {
+                out.pointer_staged = true;
+            }
+            if y != ' ' && y != '?' {
+                out.pointer_unstaged = true;
+            }
+        }
+    }
+    out.committed = !out.pointer_staged && !out.pointer_unstaged;
+
+    // 父仓库索引记录的指针(gitlink)oid → 子模块领先提交数
+    let index_spec = format!(":{}", rel);
+    if let Ok(oid) = run_git(&parent, &["rev-parse", &index_spec]) {
+        let oid = oid.trim();
+        if !oid.is_empty() {
+            let range = format!("{}..HEAD", oid);
+            if let Ok(n) = run_git(repo, &["rev-list", "--count", &range]) {
+                out.commits_ahead = n.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+    out
+}
+
+/// 两个路径是否指向同一位置(能规范化时按规范化结果比较,否则按原字符串)
+fn same_path(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
 }
 
 /// 用 git diff --numstat 填充每个文件相对参照的增删行数。
@@ -1679,5 +1884,95 @@ mod tests {
 
         std::fs::remove_dir_all(repo).ok();
         std::fs::remove_dir_all(bare).ok();
+    }
+
+    #[test]
+    fn submodule_discovery_and_parent_pointer_state() {
+        let root = std::env::temp_dir().join(format!(
+            "ohmygitty-submodule-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let child = root.join("child");
+        let parent = root.join("parent");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(&parent).unwrap();
+
+        // 子模块仓库:一次初始提交
+        run_git(child.to_str().unwrap(), &["init", "-q"]).unwrap();
+        run_git(child.to_str().unwrap(), &["config", "user.email", "t@e.com"]).unwrap();
+        run_git(child.to_str().unwrap(), &["config", "user.name", "t"]).unwrap();
+        std::fs::write(child.join("a.txt"), "one\n").unwrap();
+        run_git(child.to_str().unwrap(), &["add", "."]).unwrap();
+        run_git(child.to_str().unwrap(), &["commit", "-qm", "init"]).unwrap();
+
+        // 父仓库:加入子模块并提交
+        run_git(parent.to_str().unwrap(), &["init", "-q"]).unwrap();
+        run_git(parent.to_str().unwrap(), &["config", "user.email", "t@e.com"]).unwrap();
+        run_git(parent.to_str().unwrap(), &["config", "user.name", "t"]).unwrap();
+        std::fs::write(parent.join("readme.md"), "parent\n").unwrap();
+        run_git(parent.to_str().unwrap(), &["add", "."]).unwrap();
+        run_git(parent.to_str().unwrap(), &["commit", "-qm", "init"]).unwrap();
+        run_git(
+            parent.to_str().unwrap(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                child.to_str().unwrap(),
+                "sub",
+            ],
+        )
+        .unwrap();
+        run_git(parent.to_str().unwrap(), &["commit", "-qm", "add submodule"]).unwrap();
+
+        let parent_s = parent.to_str().unwrap();
+        let sub = parent.join("sub");
+        let sub_s = sub.to_str().unwrap();
+
+        // 发现:一条子模块,路径 sub,已初始化
+        let subs = submodules(parent_s);
+        assert_eq!(subs.len(), 1, "应发现一个子模块");
+        assert_eq!(subs[0].path, "sub");
+        assert!(subs[0].initialized);
+
+        // 初始状态:父仓库已提交指针,无待同步改动
+        let st = submodule_parent_state(sub_s);
+        assert_eq!(st.parent.as_deref(), Some(parent_s));
+        assert_eq!(st.rel_path, "sub");
+        assert!(st.committed, "初始应已提交");
+        assert!(!st.pointer_staged && !st.pointer_unstaged);
+        assert_eq!(st.commits_ahead, 0);
+
+        // 子模块产生新提交 → 父仓库指针未提交(未暂存)
+        std::fs::write(sub.join("a.txt"), "two\n").unwrap();
+        run_git(sub_s, &["add", "."]).unwrap();
+        run_git(sub_s, &["commit", "-qm", "sub update"]).unwrap();
+        let st = submodule_parent_state(sub_s);
+        assert!(!st.committed);
+        assert!(st.pointer_unstaged, "父仓库指针应未暂存");
+        assert!(st.commits_ahead >= 1, "应有一个新提交");
+
+        // 父仓库暂存指针 → 已暂存但未提交
+        run_git(parent_s, &["add", "sub"]).unwrap();
+        let st = submodule_parent_state(sub_s);
+        assert!(!st.committed);
+        assert!(st.pointer_staged, "父仓库指针应已暂存");
+        assert!(!st.pointer_unstaged);
+
+        // 父仓库提交指针 → 已提交
+        run_git(parent_s, &["commit", "-qm", "update submodule pointer"]).unwrap();
+        let st = submodule_parent_state(sub_s);
+        assert!(st.committed, "父仓库提交后应无待提交指针");
+        assert!(!st.pointer_staged && !st.pointer_unstaged);
+        assert_eq!(st.commits_ahead, 0);
+
+        // 非子模块仓库:parent 为 None
+        let plain = submodule_parent_state(parent_s);
+        assert!(plain.parent.is_none());
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

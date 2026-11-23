@@ -40,6 +40,12 @@ fn git_status(repo: String) -> git::RepoStatus {
     git::status(&repo)
 }
 
+/// 子模块视图:父仓库是否已提交本子模块的指针(gitlink)改动
+#[tauri::command]
+fn git_submodule_parent_state(repo: String) -> git::SubmoduleParentState {
+    git::submodule_parent_state(&repo)
+}
+
 /// 单仓库状态摘要(侧栏列表/总览仪表盘用)
 #[derive(Serialize, Clone)]
 struct RepoSummary {
@@ -58,6 +64,8 @@ struct RepoSummary {
     icon: Option<String>,
     /// 项目分类:web(网页应用)/ desktop(桌面应用)/ extension(浏览器插件)/ backend(后端服务)/ other
     category: String,
+    /// 直接子模块(侧栏可折叠叶子节点;无子模块时为空)
+    submodules: Vec<git::SubmoduleInfo>,
 }
 
 /// 图标搜索目录(相对项目根,按优先级;空串为根目录)
@@ -354,6 +362,7 @@ fn summarize(path: &str) -> RepoSummary {
         },
         icon: icon_cached(path),
         category: repo_category(path).to_string(),
+        submodules: git::submodules(path),
     }
 }
 
@@ -1948,6 +1957,7 @@ pub fn run() {
             settings_load,
             settings_save,
             git_status,
+            git_submodule_parent_state,
             git_init,
             gitignore_read,
             gitignore_write,

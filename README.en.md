@@ -32,7 +32,8 @@ So I built Oh My Gitty: a lightweight, standalone companion focused on Git manag
 | Module | Description |
 | --- | --- |
 | Overview dashboard | KPI cards across all projects, one-year commit heatmap, project-type donut chart, filterable/searchable project cards with one-click server launch |
-| Project sidebar | Open/clone/drag-and-drop repositories, auto-detected project icons and types, live status summaries (branch, ahead/behind, change counts) |
+| Project sidebar | Open/clone/drag-and-drop repositories, auto-detected project icons and types, live status summaries (branch, ahead/behind, change counts); expandable submodule leaf nodes that switch straight into each submodule repo |
+| Submodule view | In a submodule repo, shows whether the superproject's gitlink pointer change is committed (unstaged / staged / committed), with a one-click switch back to the parent |
 | Workspace panel | Conflicts/staged/changes in three groups, inline diff preview, per-file stage/discard (two-step confirm), one-click ignore-rule setup with auto-generated `.gitignore` candidates |
 | Commit | Commits staged changes only → AI-generated commit message → commit; or stage everything in one click |
 | AI integrations | OpenAI-compatible APIs plus local CLIs including Claude Code, Codex CLI, Gemini CLI, Qwen Code, Ollama, Crush, and OpenCode |

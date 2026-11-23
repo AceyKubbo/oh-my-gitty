@@ -622,6 +622,37 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 /* 简洁模式(仅图标):绿点会与修改数角标挤在图标区,不显示 */
 #sidebar.collapsed .repo-run-dot { display: none; }
 .sidebar-empty { padding: 8px 10px; font-size: 12px; color: var(--text-dim); }
+
+/* ===== 子模块:父项目下的可折叠叶子节点 ===== */
+/* 父项目行的展开/折叠按钮(贴在行尾,不影响原有图标+信息两列布局) */
+.submodule-toggle {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; color: var(--text-dim); background: transparent; z-index: 1;
+}
+.submodule-toggle:hover { background: var(--hover-strong); color: var(--text); }
+.submodule-toggle svg { transition: transform .12s ease; }
+.submodule-toggle.open svg { transform: rotate(90deg); }
+/* 父项目既有子模块又有运行中绿点时,绿点让位给展开按钮 */
+.repo-item.has-submodules .repo-run-dot { right: 32px; }
+/* 叶子节点:缩进对齐父项目名,尺寸比顶层项目略小 */
+.repo-item.submodule-item {
+  padding: 6px 10px 6px 38px;
+  grid-template-columns: 18px 1fr; gap: 6px; margin-top: 0;
+}
+.submodule-item .submodule-git-icon {
+  display: flex; align-items: center; justify-content: center; color: var(--text-dim);
+}
+.submodule-item .repo-name { font-size: 12px; color: var(--text-dim); }
+.submodule-item.active .repo-name { color: var(--accent-bright); }
+/* 子模块指针落后提示:子模块有新提交、父仓库尚未记录 */
+.submodule-sync-dot {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--orange); pointer-events: none;
+}
+/* 侧栏收起(简洁轨道)时子模块节点与展开按钮都不显示 */
+#sidebar.collapsed .submodule-item, #sidebar.collapsed .submodule-toggle { display: none; }
+
 .sidebar-footer {
   display: flex; align-items: center; gap: 2px;
   /* 水平内边距与侧栏头部(12px)一致,按钮不贴边;收起态(48px 轨道)下也接近居中 */
@@ -667,6 +698,19 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .mini-btn:hover { color: var(--text); background: var(--hover); }
 .mini-btn.ai { border-color: var(--orange); color: var(--orange); }
 .mini-btn.ai:hover { background: var(--orange-soft); }
+
+/* 子模块视图:父仓库指针(gitlink)提交状态提示条 */
+.submodule-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.submodule-banner-icon { display: flex; color: var(--accent-bright); flex: none; }
+.submodule-banner-body { flex: 1; min-width: 0; }
+.submodule-banner-title { font-size: 12px; font-weight: 600; color: var(--text-head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.submodule-banner-status { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.submodule-banner-status.pending { color: var(--orange); }
+.submodule-banner-status.done { color: var(--green); }
+.submodule-banner .mini-btn { flex: none; }
 
 /* 状态字母徽标(A/M/C):右侧分组标题使用 */
 .ch-badge {

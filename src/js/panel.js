@@ -1,7 +1,7 @@
 /* 仓库面板视图:刷新主区(状态+历史)、空态、文件列表(暂存/更改/冲突)、diff 视图、
    忽略规则对话框、「更多」菜单 */
 import { $, invoke, toast, setButtonLoading, STATUS_CHARS, repo, view, repos, settings, lastShipStatus, setLastShipStatus, setNumBadge } from "./state.js";
-import { updateProjectHeader, renderRepoList, removeRepo } from "./sidebar.js";
+import { updateProjectHeader, renderRepoList, removeRepo, switchRepo } from "./sidebar.js";
 import { renderHistory } from "./history.js";
 import { toggleStage, stagePaths, discardFile, resolveOne, stageAll, discardAll, invalidateBranchCache, syncOpBanner } from "./git-ops.js";
 
@@ -43,6 +43,34 @@ export async function refresh() {
   }
   showPanel(st);
   renderHistory(hist, st.branch);
+  await syncSubmoduleBanner(targetRepo); // 子模块:父仓库指针提交状态
+}
+
+// 子模块视图:展示父仓库是否已把本子模块的指针(gitlink)改动提交进去。
+// 普通仓库隐藏该提示条;所有 git 失败都静默,不打断正常刷新。
+async function syncSubmoduleBanner(repoPath) {
+  const banner = $("sec-submodule");
+  if (!banner) return;
+  let info = null;
+  try { info = await invoke("git_submodule_parent_state", { repo: repoPath }); } catch (_) {}
+  if (repo !== repoPath) return; // 刷新期间用户已切换仓库:丢弃过期结果
+  if (!info || !info.parent) { banner.classList.add("hidden"); return; }
+  banner.classList.remove("hidden");
+  const np = (p) => String(p || "").replace(/\/+$/, "");
+  const sum = repos.find((r) => np(r.path) === np(info.parent));
+  const fallback = info.parent.split(/[\\/]/).filter(Boolean).pop() || info.parent;
+  $("submodule-parent-name").textContent = (sum && sum.name) || fallback;
+  const status = $("submodule-parent-status");
+  const pending = !!(info.pointer_staged || info.pointer_unstaged);
+  status.classList.toggle("pending", pending);
+  status.classList.toggle("done", !pending);
+  if (pending) {
+    const state = info.pointer_staged ? "已暂存" : "未暂存";
+    const ahead = info.commits_ahead > 0 ? `子模块有 ${info.commits_ahead} 个新提交，` : "";
+    status.textContent = `${ahead}父仓库指针改动${state}，尚未提交`;
+  } else {
+    status.textContent = "父仓库已提交当前指针，无需同步";
+  }
 }
 
 // 切换仓库的加载占位:延迟 150ms 显示(毫秒级切换不闪 spinner),一旦显示至少停留 250ms(避免抖一下)
@@ -76,6 +104,7 @@ export async function showEmpty(showInit) {
   leaveOverview();
   closeDiffPanel(); // 离开仓库视图,右侧编辑器不再有归属
   $("sec-history").classList.add("hidden"); // 空态不展示历史
+  $("sec-submodule").classList.add("hidden"); // 空态不展示子模块提示
   syncEditorToggle();
   // 无项目时隐藏标题栏;当前选中项不是 Git 仓库时仍保留(项目已选定)
   $("project-header").classList.toggle("hidden", !repo);
@@ -787,6 +816,15 @@ function normalizeGitignore(text) {
 /* ===== 事件绑定 ===== */
 export function bindPanelEvents() {
   $("btn-diff-close").addEventListener("click", closeDiffPanel);
+
+  // 子模块提示条:一键切回父仓库,便于暂存/提交子模块指针改动
+  $("btn-goto-parent").addEventListener("click", async () => {
+    try {
+      const info = await invoke("git_submodule_parent_state", { repo });
+      if (info && info.parent) await switchRepo(info.parent);
+      else toast("未找到父仓库", false);
+    } catch (e) { toast(String(e), false); }
+  });
 
   // 代码区暗黑模式:初始按记忆值应用,点击切换并持久化
   syncEditorTheme();
