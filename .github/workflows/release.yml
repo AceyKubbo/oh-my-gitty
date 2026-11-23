@@ -25,20 +25,38 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 生成更新说明需要完整提交历史与 tag
+          fetch-depth: 0
 
-      - name: Create draft release
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Create or reuse draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=".github/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
-          args=(--draft --title "Oh My Gitty $RELEASE_TAG")
-          if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
-          # 重跑时 Release 可能已存在,复用它避免 gh release create 失败
+          # 先确保 Release/tag 存在,下一步生成说明时才能解析到当前 tag
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists, reusing it."
           else
-            gh release create "$RELEASE_TAG" "${args[@]}"
+            gh release create "$RELEASE_TAG" --draft --title "Oh My Gitty $RELEASE_TAG" --notes "发布说明生成中…"
           fi
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 手写说明优先;否则按 Conventional Commits 自动生成分组说明
+          manual=".github/RELEASE_NOTES_${RELEASE_TAG}.md"
+          if [ -f "$manual" ]; then
+            echo "使用手写发布说明: $manual"
+            cp "$manual" release-notes.md
+          else
+            node scripts/release_notes.mjs "$RELEASE_TAG" "AceyKubbo/oh-my-gitty" release-notes.md
+          fi
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.md
 
   build-macos:
     needs: create-release
