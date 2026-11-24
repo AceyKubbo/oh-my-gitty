@@ -12,21 +12,42 @@ if (!tag || !repo || !out) {
 }
 
 function git(args) {
-  return execFileSync("git", args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
+  try {
+    return execFileSync("git", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (err) {
+    const detail = (err.stderr?.toString() || err.message).trim();
+    throw new Error(`git ${args.join(" ")} 失败: ${detail}`);
+  }
 }
 
-// 上一个 tag:从当前 tag 的父提交定位。tag 此时已由 create 步骤创建。
+function hasRev(rev) {
+  try {
+    git(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// tag 可能由 create 步骤经 GitHub API 新建；工作流会先 fetch tags，
+// 这里再兜底回退到 HEAD，避免 git log <tag> 报 unknown revision。
+const end = hasRev(tag) ? tag : "HEAD";
+if (end !== tag) {
+  console.warn(`警告: 本地未找到 tag ${tag}，改用 HEAD 生成更新说明`);
+}
+
+// 上一个 tag:从当前版本的父提交定位。首个版本没有上一个 tag。
 let prev = "";
 try {
-  prev = git(["describe", "--tags", "--abbrev=0", `${tag}^`]);
+  prev = git(["describe", "--tags", "--abbrev=0", `${end}^`]);
 } catch {
   // 首个版本没有上一个 tag
 }
 
-const range = prev ? `${prev}..${tag}` : tag;
+const range = prev ? `${prev}..${end}` : end;
 const raw = git(["log", "--no-merges", "--pretty=format:%h%x09%s", range]);
 
 const groups = [

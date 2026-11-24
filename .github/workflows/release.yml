@@ -11,11 +11,18 @@ on:
         description: '要发布的 tag,例如 v0.3.1'
         required: true
         type: string
+  # 自动流程失败后,可手动补跑指定 tag(用修复后的工作流代码)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag,例如 v0.5.0'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
-# GITHUB_REF_NAME 在 tag push 下是 tag 名;workflow_call 下取传入的 tag
+# GITHUB_REF_NAME 在 tag push 下是 tag 名;其他触发方式取传入的 tag
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
@@ -43,6 +50,11 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --draft --title "Oh My Gitty $RELEASE_TAG" --notes "发布说明生成中…"
           fi
+
+          # tag 若已真实存在(tag push 或已发布的 release),先拉到本地供 git log/describe 使用。
+          # 注意:未发布的草稿 release 是 untagged 状态,并不会创建 git tag;
+          # 这种情况由 release_notes.mjs 回退到 HEAD 生成说明,发布时 GitHub 再创建 tag。
+          git fetch --force --tags origin
 
       - name: Generate release notes
         env:
