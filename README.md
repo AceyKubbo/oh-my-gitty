@@ -54,9 +54,10 @@ Oh My Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
 
 | 平台 | 文件 |
 | --- | --- |
-| macOS Apple Silicon | `Oh.My.Gitty_<版本>_aarch64.dmg` |
-| macOS Intel | `Oh.My.Gitty_<版本>_x64.dmg` |
+| macOS（Apple Silicon / M 系列） | `Oh.My.Gitty_<版本>_aarch64.dmg` |
 | Windows 10/11（x64） | `Oh.My.Gitty_<版本>_x64-setup.exe` |
+
+macOS 版本仅支持 Apple Silicon（M 系列芯片），不再提供 Intel 版本。
 
 安装后应用会在启动时自动检查更新，也可以在「设置 → 关于与更新」中手动检查，直接在应用内完成下载与安装。
 

@@ -54,9 +54,10 @@ Go to [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases) to download 
 
 | Platform | File |
 | --- | --- |
-| macOS Apple Silicon | `Oh.My.Gitty_<version>_aarch64.dmg` |
-| macOS Intel | `Oh.My.Gitty_<version>_x64.dmg` |
+| macOS (Apple Silicon / M series) | `Oh.My.Gitty_<version>_aarch64.dmg` |
 | Windows 10/11 (x64) | `Oh.My.Gitty_<version>_x64-setup.exe` |
+
+The macOS build supports Apple Silicon (M series) only; Intel builds are no longer provided.
 
 Once installed, the app checks for updates on startup; you can also check manually under Settings → About & Update and download and install without leaving the app.
 

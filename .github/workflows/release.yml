@@ -70,59 +70,7 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --notes-file release-notes.md
 
-  build-macos:
-    needs: create-release
-    runs-on: macos-15-intel
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install icon tooling
-        run: |
-          python3 -m venv .venv
-          .venv/bin/python -m pip install pillow numpy opencv-python-headless
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Use GitHub crates registry
-        run: rm -f src-tauri/.cargo/config.toml
-
-      - name: Build dmg
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        # dmg 不在 updater 支持的目标里,须同时构建 app 目标才会产出 .app.tar.gz 与签名。
-        # bundle_dmg.sh 在 CI 上偶发失败,封装脚本负责清理残留挂载并重试、同时开启 --verbose。
-        run: bash scripts/build_mac_dmg.sh
-
-      - name: Name Intel updater artifacts
-        run: |
-          mv "src-tauri/target/release/bundle/macos/Oh My Gitty.app.tar.gz" src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz
-          mv "src-tauri/target/release/bundle/macos/Oh My Gitty.app.tar.gz.sig" src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz.sig
-
-      - name: Validate Intel packages
-        run: |
-          codesign --verify --deep --strict --verbose=2 "src-tauri/target/release/bundle/macos/Oh My Gitty.app"
-          hdiutil verify src-tauri/target/release/bundle/dmg/*.dmg
-          tar -tzf src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz >/dev/null
-
-      - name: Upload dmg to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release upload "$RELEASE_TAG"
-          src-tauri/target/release/bundle/dmg/*.dmg
-          src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz
-          src-tauri/target/release/bundle/macos/Oh.My.Gitty_x64.app.tar.gz.sig
-          --clobber
-
+  # 仅支持 Apple Silicon(M 系列);不再构建 Intel/x64 macOS 版本
   build-macos-arm:
     needs: create-release
     runs-on: macos-15
@@ -262,7 +210,7 @@ jobs:
           gh release upload "$env:RELEASE_TAG" $files --clobber
 
   publish-release:
-    needs: [build-macos, build-macos-arm, build-windows]
+    needs: [build-macos-arm, build-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -272,7 +220,7 @@ jobs:
         with:
           node-version: 22
 
-      # 汇总两个平台的更新签名,生成 updater 端点的 latest.json 一并挂到 Release
+      # 汇总 macOS(Apple Silicon)与 Windows 的更新签名,生成 updater 端点的 latest.json 一并挂到 Release
       - name: Generate update manifest
         env:
           GH_TOKEN: ${{ github.token }}

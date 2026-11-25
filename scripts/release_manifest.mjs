@@ -10,12 +10,16 @@ if (!tag || !repo || !dir || !out) {
   process.exit(1);
 }
 
-// 文件名 → updater 平台键;新平台(如 linux AppImage)在此扩展
+// 文件名 → updater 平台键;新平台(如 linux AppImage)在此扩展。
+// macOS 只支持 Apple Silicon,历史 Release 里残留的 x64 签名不会写进更新清单。
 function platformOf(artifact) {
   if (artifact.endsWith("-setup.exe")) return "windows-x86_64";
-  if (artifact.endsWith(".app.tar.gz") || artifact.endsWith(".AppImage")) {
+  if (artifact.endsWith(".app.tar.gz")) {
+    return /aarch64|arm64/.test(artifact) ? "darwin-aarch64" : null;
+  }
+  if (artifact.endsWith(".AppImage")) {
     const arch = /aarch64|arm64/.test(artifact) ? "aarch64" : "x86_64";
-    return `${artifact.endsWith(".AppImage") ? "linux" : "darwin"}-${arch}`;
+    return `linux-${arch}`;
   }
   return null;
 }
@@ -40,7 +44,7 @@ if (!Object.keys(platforms).length) {
   process.exit(1);
 }
 
-const required = ["darwin-x86_64", "darwin-aarch64", "windows-x86_64"];
+const required = ["darwin-aarch64", "windows-x86_64"];
 const missing = required.filter((platform) => !platforms[platform]);
 if (missing.length) {
   console.error(`缺少必需的更新平台: ${missing.join(", ")}`);
