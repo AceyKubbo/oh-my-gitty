@@ -11,147 +11,89 @@
 
 [简体中文](README.md) | English
 
-Oh My Gitty is a Git management tool built for solo AI-driven developers.
+**A lightweight Git tool for solo AI developers**: manage repositories, generate commits, resolve conflicts, reset versions and run dev servers without opening an IDE. Built with Tauri 2 and a native frontend, ~5–8 MB installer; Git operations use your local CLI and repository content stays on your machine by default.
 
-When developing with AI, I rarely read code directly, so most IDE features are unnecessary for me. Most of the time I just want to manage Git, control versions, or undo changes — yet I have to open heavyweight VS Code just for that small Git panel in the sidebar. Juggling multiple projects also means multiple VS Code windows: memory-hungry and anything but elegant.
+## Features at a glance
 
-So I built Oh My Gitty: a lightweight, standalone companion focused on Git management.
-
-## Highlights
-
-- **Built for AI development workflows** — use an OpenAI-compatible API or a local AI CLI to generate Conventional Commits messages and assist with merge conflicts
-- **Unified multi-repo management** — project status, commit activity, and type distribution at a glance; switch and launch projects quickly
-- **Built-in dev server management** — detects launch commands and ports for common project types, so dev servers are managed inside the app
-- **Safe, controlled version operations** — browse local and remote history, and reset to any version after confirmation
-- **Lightweight and unobtrusive** — Tauri 2 + native frontend, ~5–8 MB installer, always-on-top window and system tray
-- **Privacy first** — Git operations run through your local git CLI; repository content stays on your machine by default
-- **Adaptable interface** — dark/light themes plus 7 accent colors (purple, light/dark blue, yellow, light/dark green, red), each auto-adapted to both modes; a collapsible and resizable persistent sidebar; and a filter for repositories with uncommitted changes
-
-## Features
-
-| Module | Description |
+| Area | What you can do |
 | --- | --- |
-| Overview dashboard | KPI cards across all projects, one-year commit heatmap, project-type donut chart, filterable/searchable project cards with one-click server launch |
-| Project sidebar | Open/clone/drag-and-drop repositories, auto-detected project icons and types, live status summaries (branch, ahead/behind, change counts); expandable submodule leaf nodes that switch straight into each submodule repo |
-| Submodule view | In a submodule repo, shows whether the superproject's gitlink pointer change is committed (unstaged / staged / committed), with a one-click switch back to the parent |
-| Worktrees | Opening any worktree automatically imports every other worktree of the same repository (on launch, add, scan and via the `gitty` CLI); the sidebar marks the main repo and each linked worktree with a badge and a subtitle showing its branch and origin |
-| Workspace panel | Conflicts/staged/changes in three groups, inline diff preview, per-file stage/discard (two-step confirm), one-click ignore-rule setup with auto-generated `.gitignore` candidates |
-| Commit | Commits staged changes only → AI-generated commit message → commit; or stage everything in one click |
-| AI integrations | OpenAI-compatible APIs plus local CLIs including Claude Code, Codex CLI, Gemini CLI, Qwen Code, Ollama, Crush, and OpenCode |
-| Push / Pull | Handles branches without an upstream automatically; silent background fetch keeps status fresh; refspec push of the current branch to any remote branch (`HEAD:refs/heads/<branch>`, optional `--force-with-lease`) |
-| AI conflict resolution | Conflict files are merged by AI (> 80 KB requires manual handling), then automatically `git add`-ed with the merge completed |
-| History timeline | Combined local + remote commits; expand a commit to see its changed files, click a file to view what that commit changed relative to its previous version in the right-hand panel (or switch to the file content at that revision); reset to any historical version with a confirmation dialog |
-| Branches | Switch branches; remote branches automatically get local tracking branches; merge or compare any branch from the branch menu; compare view shows incoming commits and changed files with per-file diffs, plus cherry-pick per commit; merge/cherry-pick conflicts support AI or manual resolution with continue/abort |
-| Run panel | Scans and detects launch commands and ports (npm/django/make/cargo/go…), start/stop inside the app, line-by-line logs, external-run detection and safe shutdown |
-| In-app updates | Checks for new versions on startup (or manually in Settings → About & Update); download and install in one step, with signature verification |
-| Window | Always-on-top toggle to stay visible while coding; closing hides to the system tray |
+| Overview & repos | Dashboard with KPI cards, a one-year commit heatmap, 7-day code-volume chart, project-type breakdown and searchable/sortable/filterable project cards; open, clone, drag-and-drop or reorder repositories, and initialize a plain folder with `git init`; live sidebar status (branch, ahead/behind, change count), collapsible/resizable with a "dirty only" filter |
+| Submodules / worktrees | Expandable submodule tree with a hint on whether the superproject's gitlink pointer is committed; opening any worktree automatically imports every worktree of the same repo, with sidebar badges distinguishing the main repo from linked ones |
+| Workspace & code view | Conflicts/staged/changes groups shown as file trees with batch stage/unstage/ignore by directory, inline diffs and two-step discard confirmation; a full `.gitignore` editor that untracks newly ignored files, plus automatic status refresh on local file changes; a right-hand editor with diff / code / three-way merge tabs, an independent dark mode for code and resizable width |
+| Commits & AI | Commit staged changes only; AI streams editable Conventional Commits messages with direct-commit or confirm-first modes, custom extra instructions and a config self-test; OpenAI-compatible APIs plus local CLIs including Claude Code, Codex, Gemini, Qwen, Ollama, Crush and OpenCode; conflicts can be resolved by AI individually or in bulk, completing the merge automatically |
+| History & branches | Combined local + remote timeline; expand a commit to see changed files and per-file diffs or file content at that revision, with confirmed reset to any version; switch, merge, compare and cherry-pick branches, with AI or manual conflict resolution and continue/abort |
+| Sync & project versions | Automatic handling of branches without upstreams and silent background fetch; refspec push of the current branch to another remote branch (optional `--force-with-lease`); one-click detection and bump of project version files (package.json, Cargo.toml, pyproject.toml, pubspec.yaml, tauri.conf.json, …) keeping patch/minor/major consistent across files |
+| Run & appearance | Run panel detects launch commands and ports (npm/django/make/cargo/go…), start/stop with live logs, external-run detection and safe shutdown; dark/light themes with 7 auto-adapting accent colors, high-DPI auto scaling, always-on-top window and system tray |
+| Updates & terminal | Update check on startup with signature verification and one-step install (or manually under Settings → About & Update); the `gitty` command opens/focuses the app from any directory and switches to that project |
 
-## Installation
+## Quick start
 
-### Download from Releases
+### Install
 
-Go to [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases) to download the latest installer:
+Download from [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases):
 
 | Platform | File |
 | --- | --- |
 | macOS (Apple Silicon / M series) | `Oh.My.Gitty_<version>_aarch64.dmg` |
 | Windows 10/11 (x64) | `Oh.My.Gitty_<version>_x64-setup.exe` |
 
-The macOS build supports Apple Silicon (M series) only; Intel builds are no longer provided.
-
-Once installed, the app checks for updates on startup; you can also check manually under Settings → About & Update and download and install without leaving the app.
-
-> The macOS package is not Apple-notarized yet. On first launch, you may need to right-click the app and choose Open, or allow it under System Settings → Privacy & Security.
->
-> The Windows installer does not yet use a commercial code-signing certificate. If SmartScreen appears, verify that the installer came from this repository before choosing Run anyway.
+macOS supports Apple Silicon only; Intel builds are no longer provided. The packages are not Apple-notarized / commercially code-signed yet: on first launch you may need to right-click the macOS app and choose Open, and Windows SmartScreen prompts should be confirmed against this repository before choosing Run anyway.
 
 ### Terminal command `gitty`
 
-On **first launch**, the app automatically installs a `gitty` command into your PATH (macOS: `/usr/local/bin`, falling back to `~/.local/bin` plus a shell config entry when not writable; Windows: `%LOCALAPPDATA%\OhMyGitty\bin`, appended to the user PATH). No manual setup is needed. Development mode (`npm run dev`) does not install it.
-
-Run it from any project directory:
+Installed into PATH on first launch (macOS: `/usr/local/bin` first; Windows: `%LOCALAPPDATA%\OhMyGitty\bin`). Reopen your terminal afterwards.
 
 ```bash
 cd /path/to/your/project
-gitty
+gitty                          # open/focus the app, add the current directory and switch to it
+gitty /path/to/another/project # or pass an explicit path
 ```
-
-This launches (or focuses the already running) Oh My Gitty, adds the **current directory** to the project list, and switches to it — similar to `code .`. You can also pass an explicit path: `gitty /path/to/another/project` (the last existing directory wins).
-
-> Reopen your terminal after installation (especially on Windows) so the PATH change takes effect.
 
 ### Build from source
 
-Requires [Node.js](https://nodejs.org/) 18+ and [Rust](https://www.rust-lang.org/). On Windows, also install Microsoft C++ Build Tools and WebView2 per the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
+Requires [Node.js](https://nodejs.org/) 18+ and [Rust](https://www.rust-lang.org/). On Windows, also install the C++ Build Tools and WebView2 from the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
 
 ```bash
 git clone https://github.com/AceyKubbo/oh-my-gitty.git
 cd oh-my-gitty
 npm ci
-npm run dev      # development mode (auto-reloads on save)
+npm run dev      # development mode, auto-reloads on save
 npm run build    # macOS: .dmg; Windows: NSIS setup.exe
 ```
 
-## Getting Started
+After launching: pick a local repository or clone a remote → choose an AI API or local CLI in Settings → review changes in the workspace and commit → sync with Push / Pull → start a dev server in the Run panel.
 
-1. Open the app → "Select Repository" to pick any local project folder, or clone from a remote URL
-2. "Settings" at the bottom of the sidebar → choose an OpenAI-compatible API or a local AI CLI; API mode needs an endpoint, key, and model, while CLI mode scans tools that are already installed and signed in
-3. Review conflicts, staged, and unstaged changes in the workspace; click a file to preview its diff
-4. Click "Commit" to generate or write a message, then "Push / Pull" to sync with the remote
-5. In the "Run" panel, pick a detected launch command, watch the logs, and start/stop dev servers
-
-## Privacy & Security
+## Privacy & security
 
 - Git operations run through your local `git` CLI; repository content stays on your machine by default.
-- API mode sends relevant diffs, recent commit messages, or conflicted file contents to the configured AI endpoint. Local CLI mode passes the same type of content to the selected tool; whether it uploads data depends on that provider. Review the applicable privacy policy and data practices.
-- The AI API key is stored only in the local config; the GitHub token is used to create remote repositories and push — never commit or share it publicly.
-- Report security vulnerabilities privately via the [security policy](SECURITY.md); general issues and feature suggestions can go to [Issues](https://github.com/AceyKubbo/oh-my-gitty/issues) or email `hello@lumifold.top`.
+- API mode sends relevant diffs, recent commits or conflicted files to the configured AI endpoint. Local CLI mode passes the same content to the selected tool; whether it uploads data depends on that provider. Review its privacy policy.
+- The AI API key is stored only in local config; the GitHub token is used solely to create remote repositories and push — never commit or share it.
+- Report vulnerabilities privately via the [security policy](SECURITY.md); use [Issues](https://github.com/AceyKubbo/oh-my-gitty/issues) or email `hello@lumifold.top` for feedback.
 
-## Tech Stack
+## Tech stack & structure
 
-- **Tauri 2** + Rust backend (system git CLI, ~5–8 MB installer)
-- Native HTML/CSS/JS frontend, no bundler
-- AI through OpenAI-compatible APIs (OpenAI / DeepSeek / local services) or local CLIs (Claude Code / Codex / Gemini / Qwen / Ollama / Crush / OpenCode)
-
-## Structure
+Tauri 2 with a Rust backend wrapping the system git CLI, and a native HTML/CSS/JS frontend with no bundler. AI comes from OpenAI-compatible APIs or local CLIs. See the [design system](docs/ui-design-system.md) for UI conventions.
 
 ```
-src/                Frontend (static, no build step)
+src/                Frontend static assets, no build step
 src-tauri/src/      Backend
   git.rs            git CLI wrapper + porcelain v2 parsing
   ai.rs             AI commit messages / conflict resolution
-  runner.rs         Server process supervision / port probing
-  process.rs        Cross-platform process spawning (suppresses console windows on Windows)
-  watcher.rs        Repository file watching / automatic status refresh
-  cli.rs            `gitty` terminal command setup and open-directory argument handling
-  version.rs        Version detection and bumping for managed projects
+  runner.rs         Dev server supervision / port probing
+  watcher.rs        Repository watching / automatic status refresh
+  version.rs        Project version detection & batch bump
+  cli.rs            `gitty` command setup and directory arguments
   config.rs         Settings persistence
-  lib.rs            Tauri commands (including in-app updater plugin setup)
+  lib.rs            Tauri command entry point
 ```
 
-## Project Status
+## Note
 
-> ⚠️ **This project is 100% AI-developed.**
->
-> From architecture design to implementation, feature iteration, and bug fixes, everything is done by AI; humans only confirm requirements and accept results. This means:
->
-> - The code may contain **potential bugs or uncovered edge cases**
-> - Some features may lack **thorough real-world testing**
-> - **Use with caution in production** and keep backups of important data
->
-> That said, development continues. If you run into problems, please open an [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues) — every piece of feedback makes this project better 🐱
+> ⚠️ This project is 100% AI-developed: architecture, implementation, iteration and fixes are all done by AI; humans only confirm requirements and accept results. It may contain uncovered edge cases or features without thorough real-world testing — use with caution in production and back up important data. Please open an [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues) if you find a problem 🐱
 
-## Known Limitations
+- Diffs over 60 KB are truncated before being sent for AI commit messages; conflict files over 80 KB need manual resolution.
+- Remote credentials are delegated to the system git helper (macOS Keychain / Windows Credential Manager); repository hooks are respected and `--no-verify` is never used.
 
-- When generating commit messages, diffs over 60 KB are truncated before being sent to the AI
-- Conflict files over 80 KB cannot be handled by AI and need manual resolution (the app will prompt)
-- Remote credentials are delegated to the system git credential helper (macOS Keychain / Windows Credential Manager)
-- Repository hooks are respected (`--no-verify` is never used)
+## Contributing & license
 
-## Contributing
-
-Issues and PRs are welcome! Please read [CONTRIBUTING.en.md](CONTRIBUTING.en.md) first.
-
-## License
-
-[MIT](LICENSE) © Bavoch
+Issues and PRs are welcome; please read the [contributing guide](CONTRIBUTING.en.md) first. Licensed under [MIT](LICENSE) © Bavoch.

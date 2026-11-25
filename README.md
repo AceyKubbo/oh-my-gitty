@@ -11,147 +11,89 @@
 
 简体中文 | [English](README.en.md)
 
-Oh My Gitty 是一款专为单人 AI 开发者打造的 Git 管理工具。
+**为单人 AI 开发者打造的轻量 Git 工具**：不用打开 IDE，就能集中管理仓库、生成提交、解决冲突、回退版本和启停开发服务器。基于 Tauri 2 + 原生前端，安装包约 5–8 MB；Git 操作走本机 CLI，仓库内容默认留在本机。
 
-在使用 AI 进行开发时，我通常很少直接阅读代码，因此 IDE 中的大部分功能对我来说并不必要。很多时候，我只是想管理 Git、控制版本或撤销操作，却不得不打开庞大的 VsCode，只为使用左侧那一小块 Git 面板。与此同时，开发多个项目还意味着要打开多个 VsCode 窗口，不仅占用内存，也不够简洁优雅。
+## 功能一览
 
-因此，我做了 Oh My Gitty：一款专注于 Git 管理、轻量且独立的开发辅助工具。
-
-## 核心亮点
-
-- **专注 AI 开发工作流** — 可通过 OpenAI 兼容 API 或本地 AI CLI 自动生成 Conventional Commits 提交信息，并辅助处理 Git 冲突
-- **多仓库统一管理** — 集中查看项目状态、提交活动与类型分布，快速切换和启动项目
-- **内置运行环境管理** — 自动识别常见项目的启动方式与端口，在应用内管理开发服务器
-- **安全可控的版本操作** — 支持查看本地与远程历史，并在确认后回退到任意版本
-- **轻量且不打扰开发** — Tauri 2 + 原生前端，约 5–8 MB 安装包，支持窗口置顶与系统托盘
-- **隐私优先** — Git 操作通过本机 CLI 完成，仓库内容默认保留在本机
-- **界面可按习惯调整** — 支持深浅主题与 7 种主题色（紫色/浅蓝/深蓝/黄色/浅绿/深绿/红色，均自动适配明暗模式）、可收起侧栏、侧栏宽度持久化和“只显示待提交项目”筛选
-
-## 功能
-
-| 模块 | 说明 |
+| 场景 | 能做什么 |
 | --- | --- |
-| 总览仪表盘 | 全部项目的 KPI 卡片、近一年提交热力图、项目类型环形图、可筛选/搜索/启动服务器的项目卡片网格 |
-| 项目侧栏 | 打开/克隆/拖拽添加仓库，自动识别项目图标与类型，状态摘要（分支、领先/落后、更改数）实时刷新；可折叠展开子模块叶子节点并点击切换 |
-| 子模块视图 | 在子模块仓库界面提示父仓库的 gitlink 指针改动是否已提交（未暂存/已暂存/已提交），并可一键切回父仓库 |
-| Worktree 工作树 | 打开任一工作树时自动带入同一仓库的全部 worktree（启动/添加/扫描/`gitty` 入口均覆盖）；侧栏用角标与副标题标记主仓库与各从属工作树的分支和来源关系 |
-| 工作区面板 | 冲突/暂存/更改三分组展示，行内 diff 预览，单文件暂存/丢弃（两步确认防误操作），一键配置忽略规则（自动生成 .gitignore 候选） |
-| 提交 | 只提交已暂存内容 → AI 自动生成提交信息 → 提交；也可一键全部暂存 |
-| AI 接入 | 支持 OpenAI 兼容 API，以及 Claude Code、Codex CLI、Gemini CLI、Qwen Code、Ollama、Crush、OpenCode 等本地 CLI 工具 |
-| 推送 / 拉取 | 自动处理无上游分支；后台静默 fetch 保持状态新鲜；支持用 refspec 把当前分支推送到远程的其他分支（`HEAD:refs/heads/<分支>`，可选 `--force-with-lease`） |
-| AI 冲突解决 | 冲突文件交给 AI 合并（> 80 KB 需手动），自动 `git add` 并完成合并 |
-| 历史时间线 | 本地+远程提交合并展示；展开提交可查看改动文件清单，点击文件在右侧查看该提交相对上一版本的差异（即这次改了什么，也可切换查看该版本文件内容）；一键回退到任意历史版本（确认弹窗） |
-| 分支 | 切换分支，远程分支自动创建本地跟踪分支；逐项「合并」「对比」目标分支；对比视图查看传入提交与改动文件（逐文件 diff），可逐条挑拣提交；合并/挑拣冲突支持 AI 或手动解决后继续/终止 |
-| 运行面板 | 自动扫描并识别启动命令与运行端口（npm/django/make/cargo/go…），应用内一键启停、逐行日志、外部运行检测与安全停止 |
-| 应用内更新 | 启动时自动检查新版本（也可在设置中手动检查），下载安装一步完成，签名校验保证更新包可信 |
-| 窗口 | 一键置顶保持可见，关闭时隐藏到系统托盘常驻 |
+| 总览与多仓库 | 仪表盘提供 KPI 卡片、近一年提交热力图、近 7 日代码量、项目类型分布与可搜索/排序/筛选的项目卡片；仓库可打开、克隆、拖拽添加、拖动排序，普通文件夹可一键 `git init`；侧栏实时显示分支、领先/落后与改动数，支持折叠、宽度记忆和「只看待提交项目」 |
+| 子模块 / Worktree | 子模块树可展开导航，并提示父仓库 gitlink 指针是否已提交；打开任一工作树会自动带入同一仓库的全部 worktree，侧栏用角标区分主仓库与从属工作树 |
+| 工作区与代码查看 | 冲突/暂存/更改三分组、文件树化展示（目录批量暂存/取消暂存/忽略）、行内 diff、单文件两步确认丢弃、完整 `.gitignore` 编辑器并自动取消跟踪已忽略文件；本地文件变化会自动刷新状态；右侧编辑器有「差异 / 代码 / 合并（三向）」三个视图，代码区可独立切换暗黑模式，宽度可拖拽 |
+| 提交与 AI | 只提交已暂存内容；AI 流式生成 Conventional Commits（可编辑、可选直接提交或确认后提交、可追加自定义要求），支持配置自测；可用 OpenAI 兼容 API 或 Claude Code、Codex、Gemini、Qwen、Ollama、Crush、OpenCode 等本地 CLI；冲突文件支持单个或批量 AI 解决并自动完成合并 |
+| 历史与分支 | 本地 + 远程提交合并时间线，展开可看改动文件并逐文件查看 diff 或该版本文件内容，确认后可回退到任意版本；分支可切换、合并、对比和逐条挑拣提交，冲突支持 AI 或手动解决后继续/终止 |
+| 同步与工程版本 | 自动处理无上游分支、后台静默 fetch；支持 refspec 将当前分支推送到远程其他分支（可选 `--force-with-lease`）；一键识别并升级项目版本文件（package.json / Cargo.toml / pyproject.toml / pubspec.yaml / tauri.conf.json 等），patch/minor/major 多文件保持一致 |
+| 运行与外观 | 运行面板自动识别启动命令与端口（npm/django/make/cargo/go…），应用内启停、逐行日志、外部运行检测与安全停止；深浅主题 + 7 种强调色自动适配明暗、高 DPI 自动缩放、窗口置顶与托盘常驻 |
+| 更新与终端入口 | 启动自动检查更新，签名校验后一步安装（也可在「设置 → 关于与更新」手动检查）；`gitty` 命令可从任意目录打开/聚焦应用并切换到当前项目 |
 
-## 安装
+## 快速开始
 
-### 从 Release 下载
+### 安装
 
-前往 [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases) 下载最新版安装包：
+从 [Releases](https://github.com/AceyKubbo/oh-my-gitty/releases) 下载：
 
 | 平台 | 文件 |
 | --- | --- |
 | macOS（Apple Silicon / M 系列） | `Oh.My.Gitty_<版本>_aarch64.dmg` |
 | Windows 10/11（x64） | `Oh.My.Gitty_<版本>_x64-setup.exe` |
 
-macOS 版本仅支持 Apple Silicon（M 系列芯片），不再提供 Intel 版本。
+macOS 仅支持 Apple Silicon，不再提供 Intel 版本。安装包尚未 Apple 公证 / 使用商业代码签名：首次启动 macOS 应用可能需右键选「打开」，Windows 的 SmartScreen 提示请确认来源后选择「仍要运行」。
 
-安装后应用会在启动时自动检查更新，也可以在「设置 → 关于与更新」中手动检查，直接在应用内完成下载与安装。
+### 终端命令 `gitty`
 
-> macOS 安装包暂未经过 Apple 公证，首次启动可能需要右键应用并选择「打开」，或在「系统设置 → 隐私与安全性」中允许。
->
-> Windows 安装包暂未使用商业代码签名证书；SmartScreen 提示时，请确认文件来自本仓库后选择「仍要运行」。
-
-### 终端命令行入口 `gitty`
-
-应用**首次启动**时会自动把 `gitty` 命令安装到 PATH（macOS 优先 `/usr/local/bin`，无写权限时退回 `~/.local/bin` 并补写 shell 配置；Windows 写入 `%LOCALAPPDATA%\OhMyGitty\bin` 并追加到用户 PATH），无需手动配置。开发模式（`npm run dev`）不会安装。
-
-在任意项目目录里执行：
+首次启动时自动安装到 PATH（macOS 优先 `/usr/local/bin`，Windows 写入 `%LOCALAPPDATA%\OhMyGitty\bin`）；安装后需重新打开终端。
 
 ```bash
 cd /path/to/your/project
-gitty
+gitty                          # 打开/聚焦应用，并把当前目录加入项目列表并切换过去
+gitty /path/to/another/project # 也可显式指定路径
 ```
-
-即可启动（或聚焦已运行的）Oh My Gitty，并把**当前目录**加入项目列表、切换到该项目——类似 `code .` 的体验。若应用已在运行，新目录会自动切换到前台。也可显式指定路径：`gitty /path/to/another/project`（以最后一个存在的目录为准）。
-
-> 安装后需**重新打开终端**（Windows 上尤其如此），PATH 修改才会在新终端里生效。开发模式不会安装该命令。
 
 ### 从源码构建
 
-需要 [Node.js](https://nodejs.org/) 18+ 和 [Rust](https://www.rust-lang.org/)。Windows 还需要按 [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) 安装 Microsoft C++ Build Tools 与 WebView2。
+需要 [Node.js](https://nodejs.org/) 18+ 和 [Rust](https://www.rust-lang.org/)；Windows 另需 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows) 中的 C++ Build Tools 与 WebView2。
 
 ```bash
 git clone https://github.com/AceyKubbo/oh-my-gitty.git
 cd oh-my-gitty
 npm ci
-npm run dev      # 开发模式（保存后窗口自动重载）
-npm run build    # macOS 输出 .dmg；Windows 输出 NSIS setup.exe
+npm run dev      # 开发模式，保存后自动重载
+npm run build    # macOS 输出 .dmg，Windows 输出 NSIS setup.exe
 ```
 
-## 使用
-
-1. 打开应用 → 「选择仓库」选任意本地项目文件夹，或者从远程地址克隆
-2. 侧栏底部「设置」→ 选择 OpenAI 兼容 API 或本地 AI CLI；API 模式填写地址、Key 和模型，本地 CLI 模式会扫描已安装并完成登录的工具
-3. 在工作区查看冲突、暂存区和未暂存改动，点击文件可预览 diff
-4. 点击「提交」生成或填写提交信息，再用「推送 / 拉取」同步远程仓库
-5. 在「运行」面板选择识别到的启动命令，查看日志并启停开发服务器
+打开应用后：选择本地仓库或克隆远程 → 在设置中选择 AI 接口或本地 CLI → 在工作区查看改动并提交 → 用「推送 / 拉取」同步 → 在「运行」面板启动开发服务器。
 
 ## 隐私与安全
 
-- Git 操作通过本机的 `git` CLI 完成，仓库内容默认只留在本机。
-- API 模式会把相关 diff、近期提交信息或冲突文件内容发送到设置中填写的 AI 接口；本地 CLI 模式会把同类内容交给所选工具处理，该工具是否上传数据取决于其提供方。请确认对应服务的隐私政策和数据处理方式。
-- AI API Key 仅保存在本机配置中；GitHub Token 用于创建远程仓库和推送，请勿提交到仓库或公开分享。
-- 发现安全漏洞请按 [安全策略](SECURITY.md) 私密报告；一般问题和功能建议可提交 [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues)，也可以邮件联系 `hello@lumifold.top`。
+- Git 操作通过本机 `git` CLI 完成，仓库内容默认只留在本机。
+- API 模式会把相关 diff、近期提交或冲突文件发往你配置的 AI 接口；本地 CLI 模式把同类内容交给所选工具，是否上传取决于该工具提供方。请自行确认其隐私政策。
+- AI API Key 只保存在本机配置；GitHub Token 仅用于创建远程仓库和推送，请勿提交或分享。
+- 发现漏洞请按 [安全策略](SECURITY.md) 私密报告；问题与建议走 [Issues](https://github.com/AceyKubbo/oh-my-gitty/issues) 或邮件 `hello@lumifold.top`。
 
-## 技术栈
+## 技术栈与结构
 
-- **Tauri 2** + Rust 后端（系统 git CLI，约 5–8 MB 安装包）
-- 原生 HTML/CSS/JS 前端，无打包器
-- AI 支持 OpenAI 兼容接口（OpenAI / DeepSeek / 本地服务）和本地 CLI（Claude Code / Codex / Gemini / Qwen / Ollama / Crush / OpenCode）
-
-## 结构
+Tauri 2 + Rust 后端（封装系统 git CLI），原生 HTML/CSS/JS 前端、无打包器；AI 走 OpenAI 兼容接口或本地 CLI。UI 规范见 [设计系统](docs/ui-design-system.md)。
 
 ```
-src/                前端（静态，无构建）
+src/                前端静态资源，无需构建
 src-tauri/src/      后端
   git.rs            git CLI 封装 + porcelain v2 解析
-  ai.rs             AI 提交信息 / 冲突解决
-  runner.rs         服务器进程托管 / 端口探测
-  process.rs        跨平台进程启动（Windows 下抑制控制台窗口）
+  ai.rs             AI 提交信息生成 / 冲突解决
+  runner.rs         开发服务器进程托管 / 端口探测
   watcher.rs        仓库文件监听 / 状态自动刷新
-  cli.rs            gitty 终端命令安装与打开目录参数处理
-  version.rs        被管理项目的版本号识别与升级
+  version.rs        项目版本文件识别与批量升级
+  cli.rs            gitty 命令安装与目录参数
   config.rs         设置持久化
-  lib.rs            Tauri 命令（含应用内更新插件配置）
+  lib.rs            Tauri 命令入口
 ```
 
-## 项目状态
+## 注意
 
-> ⚠️ **这是一个 100% 由 AI 开发的项目。**
->
-> 从架构设计到代码实现、从功能迭代到问题修复，全部由 AI 完成，人工仅参与需求确认与验收。这意味着：
->
-> - 代码可能存在**潜在的 bug 或未覆盖的边界情况**
-> - 部分功能可能**未经充分的真实场景测试**
-> - 请**谨慎用于生产环境**，重要数据请做好备份
->
-> 尽管如此，我们仍在持续迭代中。如果你在使用过程中发现问题，欢迎提交 [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues)——每一条反馈都是这个项目变得更好的动力 🐱
+> ⚠️ 这是一个 100% 由 AI 开发的项目：从架构到实现、迭代与修复均由 AI 完成，人工只参与需求确认与验收。可能有未覆盖的边界或未经真实场景验证的功能，请谨慎用于生产环境并备份重要数据。遇到问题欢迎提 [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues) 🐱
 
-## 已知边界
+- 生成提交信息时，超过 60 KB 的 diff 会被截断；冲突文件超过 80 KB 需手动解决。
+- 远端需要凭证时复用系统 git 凭据助手（macOS Keychain / Windows Credential Manager）；尊重仓库 hooks，不使用 `--no-verify`。
 
-- 生成提交信息时，超过 60 KB 的 diff 会被截断后再交给 AI 分析
-- 冲突文件 > 80 KB 时 AI 无法处理，需手动解决（应用会提示）
-- 远端需要凭证时，复用系统 git 凭据助手（macOS Keychain / Windows Credential Manager）
-- 尊重仓库 hooks（`--no-verify` 不启用）
+## 贡献与协议
 
-## 贡献
-
-欢迎提交 Issue 和 PR！请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 协议
-
-[MIT](LICENSE) © Bavoch
+欢迎 Issue 和 PR，请先阅读 [贡献指南](CONTRIBUTING.md)。项目采用 [MIT](LICENSE) 协议 © Bavoch。
