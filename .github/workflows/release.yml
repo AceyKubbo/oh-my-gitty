@@ -98,8 +98,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        # dmg 不在 updater 支持的目标里,须同时构建 app 目标才会产出 .app.tar.gz 与签名
-        run: npx tauri build --bundles app,dmg
+        # dmg 不在 updater 支持的目标里,须同时构建 app 目标才会产出 .app.tar.gz 与签名。
+        # bundle_dmg.sh 在 CI 上偶发失败,封装脚本负责清理残留挂载并重试、同时开启 --verbose。
+        run: bash scripts/build_mac_dmg.sh
 
       - name: Name Intel updater artifacts
         run: |
@@ -153,7 +154,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --target aarch64-apple-darwin --bundles app,dmg
+        run: bash scripts/build_mac_dmg.sh aarch64-apple-darwin
 
       - name: Name Apple Silicon updater artifacts
         run: |
