@@ -2063,10 +2063,14 @@ mod tests {
             ],
         )
         .unwrap();
+        let sub = parent.join("sub");
+        // submodule add 克隆出的工作树不会继承 child 仓库里的本地 user.* 配置,
+        // CI 上又没有全局身份,后面在子模块里提交会因 "Author identity unknown" 失败。
+        run_git(sub.to_str().unwrap(), &["config", "user.email", "t@e.com"]).unwrap();
+        run_git(sub.to_str().unwrap(), &["config", "user.name", "t"]).unwrap();
         run_git(parent.to_str().unwrap(), &["commit", "-qm", "add submodule"]).unwrap();
 
         let parent_s = parent.to_str().unwrap();
-        let sub = parent.join("sub");
         let sub_s = sub.to_str().unwrap();
 
         // 发现:一条子模块,路径 sub,已初始化
