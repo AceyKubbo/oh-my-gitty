@@ -66,6 +66,8 @@ struct RepoSummary {
     category: String,
     /// 直接子模块(侧栏可折叠叶子节点;无子模块时为空)
     submodules: Vec<git::SubmoduleInfo>,
+    /// 根目录不是仓库、由递归扫描发现的子仓库(侧栏折叠叶子,交互同子模块但无父指针状态)
+    folder_children: Vec<git::SubmoduleInfo>,
     /// worktree 关系(非 worktree 仓库时 entries 为空)
     worktree: git::WorktreeInfo,
 }
@@ -341,12 +343,39 @@ fn repo_category(repo: &str) -> &'static str {
     "other"
 }
 
-fn summarize(path: &str) -> RepoSummary {
+/// 生成摘要,并可附带「打开非仓库文件夹时递归发现的子仓库」作为折叠叶子。
+fn summarize_with_children(path: &str, folder_children: &[String]) -> RepoSummary {
     let st = git::status(path);
     let name = std::path::Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
+    // 递归发现的子仓库统一构造成 SubmoduleInfo(借用侧栏子模块交互),
+    // auto_discovered=true 让前端绕过父仓库 gitlink 指针提示。
+    let children: Vec<git::SubmoduleInfo> = folder_children
+        .iter()
+        .map(|p| {
+            let path_buf = std::path::Path::new(p);
+            let rel = path_buf
+                .strip_prefix(std::path::Path::new(path))
+                .unwrap_or(path_buf)
+                .to_string_lossy()
+                .to_string();
+            let child_name = path_buf
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| p.clone());
+            git::SubmoduleInfo {
+                name: child_name,
+                path: rel,
+                full_path: p.clone(),
+                head: String::new(),
+                state: " ".into(),
+                initialized: true,
+                auto_discovered: true,
+            }
+        })
+        .collect();
     RepoSummary {
         path: path.to_string(),
         name,
@@ -364,8 +393,17 @@ fn summarize(path: &str) -> RepoSummary {
         },
         icon: icon_cached(path),
         category: repo_category(path).to_string(),
-        submodules: git::submodules(path),
-        worktree: git::worktrees(path),
+        submodules: if st.is_repo {
+            git::submodules(path)
+        } else {
+            Vec::new()
+        },
+        folder_children: children,
+        worktree: if st.is_repo {
+            git::worktrees(path)
+        } else {
+            git::WorktreeInfo::default()
+        },
     }
 }
 
@@ -495,6 +533,48 @@ mod tests {
             "node_modules 内仓库应被跳过"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn non_repo_folder_registers_discovered_children_as_group() {
+        let base = std::env::temp_dir().join(format!("ohmygitty-group-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // root(非仓库)/ proj-a(repo) / work/proj-b(repo) / plain(普通,不加入)
+        std::fs::create_dir_all(base.join("proj-a/.git")).unwrap();
+        std::fs::create_dir_all(base.join("work/proj-b/.git")).unwrap();
+        std::fs::create_dir_all(base.join("plain")).unwrap();
+
+        let mut s = Settings::default();
+        let (chosen, added) = add_path_with_discovery(&mut s, base.to_str().unwrap());
+        assert!(added, "首次打开应算作新增");
+        assert_eq!(chosen, base.canonicalize().unwrap().to_string_lossy().to_string(), "切换路径应为分组根目录");
+        assert_eq!(s.repos.len(), 1, "仅根目录作为顶层项目");
+        let children = s.folder_groups.get(&chosen).unwrap();
+        assert_eq!(children.len(), 2, "应发现两个子仓库");
+        assert!(children.iter().any(|c| c.ends_with("proj-a")));
+        assert!(children.iter().any(|c| c.ends_with("proj-b")));
+        assert!(!children.iter().any(|c| c.ends_with("plain")));
+
+        // 摘要把子仓库作为 folder_children 叶子带回
+        let sum = summarize_with_children(&chosen, children);
+        assert!(!sum.is_repo, "分组根目录本身不是仓库");
+        assert_eq!(sum.folder_children.len(), 2);
+        assert!(sum.folder_children.iter().all(|c| c.auto_discovered));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn repo_folder_not_registered_as_group() {
+        let base = std::env::temp_dir().join(format!("ohmygitty-repo-add-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join(".git")).unwrap();
+        let mut s = Settings::default();
+        let (chosen, added) = add_path_with_discovery(&mut s, base.to_str().unwrap());
+        assert!(added);
+        assert_eq!(chosen, base.to_string_lossy().to_string());
+        assert!(s.folder_groups.is_empty(), "仓库本身不应登记为虚拟分组");
+        assert_eq!(s.repos.len(), 1);
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
@@ -707,17 +787,28 @@ mod tests {
 async fn repos_status_all(app: tauri::AppHandle) -> Vec<RepoSummary> {
     let settings = SettingsStore::new(&app).load();
     let paths = settings.repos.clone();
+    let groups = settings.folder_groups.clone();
     tauri::async_runtime::spawn_blocking(move || {
         std::thread::scope(|s| {
             let handles: Vec<_> = paths
                 .iter()
                 .enumerate()
-                .map(|(i, p)| (i, p, s.spawn(|| summarize(p))))
+                .map(|(i, p)| {
+                    let children = groups.get(p).cloned().unwrap_or_default();
+                    (
+                        i,
+                        p,
+                        s.spawn(move || summarize_with_children(p, &children)),
+                    )
+                })
                 .collect();
             let mut out: Vec<(usize, RepoSummary)> = Vec::with_capacity(handles.len());
             for (i, p, h) in handles {
                 // 并行线程 panic 时兜底串行重试,保证结果与列表顺序一致
-                let sum = h.join().unwrap_or_else(|_| summarize(p));
+                let children = groups.get(p).cloned().unwrap_or_default();
+                let sum = h
+                    .join()
+                    .unwrap_or_else(|_| summarize_with_children(p, &children));
                 out.push((i, sum));
             }
             out.sort_by_key(|(i, _)| *i);
@@ -788,19 +879,65 @@ async fn repos_code_volume(repos: Vec<String>, since: i64) -> CodeVolumeSummary 
 fn repos_add(app: tauri::AppHandle, path: String) -> Result<RepoAddResult, String> {
     let store = SettingsStore::new(&app);
     let mut s = store.load();
-    let key = path_key(&path);
-    let existing = s.repos.iter().find(|p| path_key(p) == key).cloned();
-    let added = existing.is_none();
-    let stored_path = existing.unwrap_or(path);
-    // 自动带入同一仓库的其它 worktree(主仓库在前),一次落盘。
-    // 即便项目已存在也重跑(例如外部新建了 worktree 后重新打开该项目)。
-    expand_repo_paths(&mut s.repos, &stored_path);
+    let (chosen, added) = add_path_with_discovery(&mut s, &path);
     store.save(&s)?;
+    let is_folder_group = s.folder_groups.contains_key(&chosen);
     Ok(RepoAddResult {
         repos: s.repos,
-        path: stored_path,
+        path: chosen,
         added,
+        is_folder_group,
     })
+}
+
+/// 把一个路径加入项目列表(供 repos_add 与 CLI 复用)。
+/// 若路径不是仓库,递归扫描其子文件夹:发现子仓库则登记为虚拟分组;
+/// 否则退回原行为,把该路径作为普通项目加入。
+/// 返回 (最终切换/高亮的路径, 是否为新增项目)。
+pub(crate) fn add_path_with_discovery(s: &mut Settings, path: &str) -> (String, bool) {
+    let root = std::path::Path::new(path)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::Path::new(path).to_path_buf());
+    let is_repo = root.join(".git").exists();
+
+    if !is_repo {
+        // 根目录不是仓库:递归发现其中的子仓库,作为「虚拟分组」加入。
+        // 目录本身作为可折叠父条目;子仓库作为叶子节点,交互同 submodule。
+        let mut found = Vec::new();
+        scan_repos(&root, 0, &mut found);
+        if !found.is_empty() {
+            return register_folder_group(s, &root, found);
+        }
+        // 既不是仓库也没发现子仓库:退回原行为,把普通文件夹作为项目加入(可 git init)
+    }
+
+    let key = path_key(path);
+    let existing = s.repos.iter().find(|p| path_key(p) == key).cloned();
+    let added = existing.is_none();
+    let stored_path = existing.unwrap_or_else(|| path.to_string());
+    // 自动带入同一仓库的其它 worktree(主仓库在前)。
+    // 即便项目已存在也重跑(例如外部新建了 worktree 后重新打开该项目)。
+    expand_repo_paths(&mut s.repos, &stored_path);
+    (stored_path, added)
+}
+
+/// 把一个非仓库根目录及其递归发现的子仓库登记为「虚拟分组」:
+/// 根目录作为父条目存入 repos,子仓库路径存入 folder_groups[root]。
+/// 已存在的分组会刷新子仓库列表(重新扫描后新增/移除的子仓库同步更新)。
+/// 返回 (根目录路径, 是否为新增分组)。
+fn register_folder_group(
+    s: &mut Settings,
+    root: &std::path::Path,
+    found: Vec<String>,
+) -> (String, bool) {
+    let root_str = root.to_string_lossy().to_string();
+    let key = path_key(&root_str);
+    let existed = s.repos.iter().any(|p| path_key(p) == key);
+    if !existed {
+        s.repos.push(root_str.clone());
+    }
+    s.folder_groups.insert(root_str.clone(), found);
+    (root_str, !existed)
 }
 
 #[derive(Serialize)]
@@ -808,6 +945,9 @@ struct RepoAddResult {
     repos: Vec<String>,
     path: String,
     added: bool,
+    /// path 是否为「非仓库根目录 + 递归发现子仓库」的虚拟分组
+    #[serde(default)]
+    is_folder_group: bool,
 }
 
 /// 启动时同步:把配置中已有项目所属的全部 worktree 补齐进项目列表。
@@ -996,6 +1136,21 @@ fn repos_remove(app: tauri::AppHandle, path: String) -> Result<Vec<String>, Stri
     let mut s = store.load();
     let key = normalize(&path);
     s.repos.retain(|p| normalize(p) != key);
+    // 移除分组根目录时,同时移除其递归子仓库(否则会残留无父条目的孤儿项目)
+    let removed_children: Vec<String> = s
+        .folder_groups
+        .iter()
+        .filter(|(root, _)| normalize(root) == key)
+        .flat_map(|(_, children)| children.clone())
+        .collect();
+    s.folder_groups.retain(|root, _| normalize(root) != key);
+    if !removed_children.is_empty() {
+        s.repos.retain(|p| !removed_children.iter().any(|c| path_key(c) == path_key(p)));
+    }
+    // 单独移除某个子仓库时,从分组的 children 中也去掉,避免叶子重新出现
+    for children in s.folder_groups.values_mut() {
+        children.retain(|c| path_key(c) != path_key(&path));
+    }
     if s.last_repo.as_deref().map(normalize).as_deref() == Some(key.as_str()) {
         s.last_repo = None;
     }
@@ -1017,6 +1172,7 @@ fn repos_clear(app: tauri::AppHandle) -> Result<(), String> {
     let store = SettingsStore::new(&app);
     let mut s = store.load();
     s.repos.clear();
+    s.folder_groups.clear();
     s.last_repo = None;
     store.save(&s)
 }

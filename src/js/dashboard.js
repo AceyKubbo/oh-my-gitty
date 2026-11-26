@@ -813,7 +813,7 @@ function emptyHint(text) {
   return d;
 }
 
-/* ===== 添加项目:一次选择多个本地项目,不递归扫描子目录 ===== */
+/* ===== 添加项目:一次选择多个本地项目,非仓库文件夹会递归发现子仓库并作为折叠分组加入 ===== */
 async function addProjects() {
   const paths = await invoke("pick_folders");
   if (!paths || !paths.length) return; // 用户取消

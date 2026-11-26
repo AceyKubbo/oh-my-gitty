@@ -22,7 +22,8 @@ export async function refresh() {
   // 一次拉取合并的 status + history + 子模块父状态(后端并行执行)。
   // 侧栏已发现的子模块直接把 parent/rel_path 传给后端走快速路径,免去子模块发现进程。
   const entry = findRepoEntry(targetRepo);
-  const hint = entry && entry.submodule
+  // 真实子模块才传父指针提示;递归发现的子仓库不涉及父仓库 gitlink,不传以免误展示提示条
+  const hint = entry && entry.submodule && !entry.auto_discovered
     ? { parent: entry.parent, rel_path: entry.rel_path }
     : null;
   const data = await invoke("git_refresh", {

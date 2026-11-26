@@ -41,9 +41,16 @@ async function init() {
     settings.repos.push(last);
     try { await invoke("settings_save", { settings }); } catch (_) {}
   }
-  setRepo(last && (settings.repos.includes(last) || nested)
+  let initial = last && (settings.repos.includes(last) || nested)
     ? last
-    : (settings.repos[0] || null));
+    : (settings.repos[0] || null);
+  // 文件夹分组根目录不是仓库:启动时展开并选中第一个子仓库,避免落到无内容空态
+  if (initial && settings.folder_groups && settings.folder_groups[initial] && settings.folder_groups[initial].length) {
+    const first = settings.folder_groups[initial][0];
+    settings.submodule_expanded = [...new Set([...(settings.submodule_expanded || []), initial])];
+    initial = first;
+  }
+  setRepo(initial);
 
   // 恢复侧栏宽度;简洁/全面展示由宽度自动决定
   let sbw = settings.sidebar_width || 172;

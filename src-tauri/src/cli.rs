@@ -64,13 +64,14 @@ pub fn open_repo(app: &tauri::AppHandle, dir: &Path) -> bool {
     }
     let store = crate::config::SettingsStore::new(app);
     let mut settings = store.load();
-    // 从 worktree 中打开时,自动把同一仓库的其它 worktree 一并带入项目列表
-    crate::expand_repo_paths(&mut settings.repos, &path);
-    settings.last_repo = Some(path.clone());
+    // 根目录不是仓库时递归发现子仓库并登记为虚拟分组;否则把该目录所属仓库的
+    // 全部 worktree 一并带入项目列表(与「打开本地仓库」行为一致)。
+    let (chosen, _) = crate::add_path_with_discovery(&mut settings, &path);
+    settings.last_repo = Some(chosen.clone());
     if store.save(&settings).is_err() {
         return false;
     }
-    let _ = app.emit(OPEN_REPO_EVENT, path);
+    let _ = app.emit(OPEN_REPO_EVENT, chosen);
     true
 }
 

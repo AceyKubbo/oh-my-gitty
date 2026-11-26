@@ -34,7 +34,7 @@ function toggleSubmoduleGroup(parentPath) {
   renderRepoList(true); // 保持滚动位置:仅展开/折叠,不跳动
 }
 
-// 按路径查找侧栏条目:顶层项目本身,或其子模块叶子(标题栏/高亮用)
+// 按路径查找侧栏条目:顶层项目本身,或其子模块/递归发现子仓库叶子(标题栏/高亮用)
 export function findRepoEntry(path) {
   if (!path) return null;
   const target = normPath(path);
@@ -43,6 +43,12 @@ export function findRepoEntry(path) {
     for (const s of r.submodules || []) {
       if (normPath(s.full_path) === target) {
         return { path: s.full_path, name: s.name, icon: null, parent: r.path, submodule: true, rel_path: s.path };
+      }
+    }
+    for (const s of r.folder_children || []) {
+      if (normPath(s.full_path) === target) {
+        // auto_discovered:交互同子模块,但不展示父仓库 gitlink 指针提示
+        return { path: s.full_path, name: s.name, icon: null, parent: r.path, submodule: true, auto_discovered: true, rel_path: s.path };
       }
     }
   }
@@ -102,9 +108,22 @@ export async function addRepoByPath(dir) {
     $("empty-state").classList.remove("hidden");
     return;
   }
-  setRepo(result.path);
-  settings.last_repo = result.path;
-  try { await invoke("repos_set_current", { path: result.path }); } catch (_) {}
+  // 虚拟分组:根目录不是仓库,展开并切换到第一个子仓库,避免出现无内容的空态
+  let target = result.path;
+  if (result.is_folder_group) {
+    const sums = await invoke("repos_status_all");
+    const group = sums.find((r) => normPath(r.path) === normPath(result.path));
+    const first = group && (group.folder_children || [])[0];
+    if (first && first.initialized) target = first.full_path;
+    if (group && !expandedSet().has(group.path)) {
+      expandedSet().add(group.path);
+      settings.submodule_expanded = [...expandedSet()];
+      invoke("settings_save", { settings }).catch(() => {});
+    }
+  }
+  setRepo(target);
+  settings.last_repo = target;
+  try { await invoke("repos_set_current", { path: target }); } catch (_) {}
   await loadRepos();
   await refresh();
   await syncRepoFileWatcher();
@@ -280,12 +299,16 @@ export function renderRepoList(keepScroll = false) {
   const running = new Set(runningRepos().map((x) => x.repo)); // 运行中项目集(绿点标识)
   for (const r of list) {
     const li = document.createElement("li");
+    // 真实子模块 + 递归发现的子仓库统一作为叶子节点(共用折叠树交互)
+    const subs = [...(r.submodules || []), ...(r.folder_children || [])];
+    const expanded = subs.length > 0 && expandedSet().has(r.path);
+    const isFolderGroup = !r.is_repo && (r.folder_children || []).length > 0;
     // 总览视图下不标记任何项目为选中(选中态属于「总览」入口),避免重渲染时残留旧高亮
     li.className = "repo-item" + (view === "repo" && normPath(r.path) === normPath(repo) ? " active" : "");
-    li.title = r.is_repo ? r.path : r.path + " · 不是 Git 仓库";
+    li.title = isFolderGroup
+      ? r.path + ` · 文件夹（含 ${subs.length} 个子仓库）`
+      : (r.is_repo ? r.path : r.path + " · 不是 Git 仓库");
     li.dataset.path = r.path; // 拖拽落点定位用
-    const subs = r.submodules || [];
-    const expanded = subs.length > 0 && expandedSet().has(r.path);
 
     const ic = document.createElement("span");
     ic.className = "repo-icon-wrap";
@@ -349,13 +372,19 @@ export function renderRepoList(keepScroll = false) {
       const tg = document.createElement("button");
       tg.className = "submodule-toggle" + (expanded ? " open" : "");
       tg.type = "button";
-      tg.title = `${expanded ? "收起" : "展开"} ${subs.length} 个子模块`;
+      tg.title = `${expanded ? "收起" : "展开"} ${subs.length} 个${isFolderGroup ? "子仓库" : "子模块"}`;
       tg.innerHTML = SUBMODULE_CARET_SVG;
       tg.addEventListener("click", (e) => { e.stopPropagation(); toggleSubmoduleGroup(r.path); });
       li.appendChild(tg);
     }
     li.addEventListener("click", () => {
       if (suppressClick) { suppressClick = false; return; } // 拖拽刚结束:吞掉合成 click
+      // 文件夹分组本身不是仓库:展开分组并切换到第一个子仓库,避免出现无内容的空态
+      if (isFolderGroup) {
+        if (!expandedSet().has(r.path)) toggleSubmoduleGroup(r.path);
+        const first = (r.folder_children || [])[0];
+        if (first && first.initialized) { switchRepo(first.full_path); return; }
+      }
       switchRepo(r.path);
     });
     // 右键:弹出项目菜单(目前仅「关闭项目」,不切换选中)
@@ -377,6 +406,7 @@ export function renderRepoList(keepScroll = false) {
         leaf.className = "repo-item submodule-item" + (view === "repo" && normPath(s.full_path) === normPath(repo) ? " active" : "");
         leaf.dataset.path = s.full_path;
         leaf.dataset.submodule = "1";
+        if (s.auto_discovered) leaf.dataset.folderChild = "1";
         leaf.title = s.full_path + (s.initialized ? "" : " · 未初始化");
         const gi = document.createElement("span");
         gi.className = "submodule-git-icon";
@@ -388,8 +418,9 @@ export function renderRepoList(keepScroll = false) {
         sn.textContent = s.name || s.path;
         si.appendChild(sn);
         leaf.append(gi, si);
-        // 父仓库指针落后于子模块('+'=有新提交未同步,'U'=冲突):橙色提示点
-        if (s.state === "+" || s.state === "U") {
+        // 父仓库指针落后于子模块('+'=有新提交未同步,'U'=冲突):橙色提示点。
+        // 递归发现的子仓库不涉及父仓库 gitlink,不展示该提示点。
+        if (!s.auto_discovered && (s.state === "+" || s.state === "U")) {
           const sync = document.createElement("span");
           sync.className = "submodule-sync-dot";
           sync.title = "子模块有改动尚未在父仓库提交";

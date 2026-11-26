@@ -57,6 +57,10 @@ pub struct SubmoduleInfo {
     pub state: String,
     /// 是否已初始化(工作区存在归属 .git)
     pub initialized: bool,
+    /// 是否为「打开非仓库文件夹时递归发现的子仓库」(而非 git 真实登记的 submodule)。
+    /// 这类仓库只借用子模块的侧栏折叠树交互,不展示父仓库 gitlink 指针提示。
+    #[serde(default)]
+    pub auto_discovered: bool,
 }
 
 /// 子模块视角下父仓库的指针(gitlink)状态:父仓库是否已把本子模块的当前提交提交进去。
@@ -539,6 +543,7 @@ pub fn submodules(repo: &str) -> Vec<SubmoduleInfo> {
             path,
             head,
             state,
+            auto_discovered: false,
         });
     }
     out
