@@ -27,9 +27,22 @@ export function currentManager(path = repo) {
   return (settings.run_pkg_manager || {})[path] || "";
 }
 
-// chip 展示文案:package.json 脚本只显示「脚本名 + 包管理器」,其余(非 npm 系)显示完整命令
+// chip 展示文案:package.json 脚本只显示脚本名(包管理器在面板左侧单独显示),其余(非 npm 系)显示完整命令
 function chipLabel(it) {
-  return it.script ? `${it.script.name}  ${it.script.manager}` : it.cmd;
+  return it.script ? it.script.name : it.cmd;
+}
+
+// 底部面板左侧的包管理器标识:优先用已保存设置,否则回退到后端按 lockfile 识别的结果
+function panelManager() {
+  return currentManager(repo) || runAllCmds.find((it) => it.script)?.script?.manager || "npm";
+}
+
+// 更新包管理器 badge(点击可直接打开运行设置弹窗)
+function updateRunPkgBadge() {
+  const badge = $("run-pkg-badge");
+  if (!badge) return;
+  badge.classList.toggle("hidden", !repo);
+  badge.textContent = panelManager();
 }
 
 // 当前仓库已隐藏的命令集合(settings.run_hidden[repo])
@@ -157,6 +170,7 @@ function renderRunCmds() {
   if (!wrap) return;
   syncRunDots(); // 运行态重渲染时一并同步侧栏绿点
   updateRunUrl();
+  updateRunPkgBadge();
   wrap.textContent = "";
   if (!repo) return;
   const hidden = hiddenCmds();
@@ -617,6 +631,7 @@ export function bindRunEvents() {
   $("btn-run-collapse").addEventListener("click", toggleRunPanel);
   $("btn-run-copy").addEventListener("click", copyRunLog);
   $("btn-run-settings").addEventListener("click", openRunSettings);
+  $("run-pkg-badge").addEventListener("click", openRunSettings); // 点左侧标识直接改包管理器
   $("btn-run-settings-cancel").addEventListener("click", closeRunSettings);
   $("btn-run-settings-save").addEventListener("click", saveRunPkgManager);
   for (const el of document.querySelectorAll('input[name="run-pkg"]')) {

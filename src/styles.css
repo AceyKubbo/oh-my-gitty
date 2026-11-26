@@ -1395,6 +1395,14 @@ body.resizing-vertical { cursor: row-resize; user-select: none; -webkit-user-sel
   height: 30px; padding: 0 10px; /* 紧凑行高,独立于侧栏底栏的 --bar-h */
 }
 .run-head .icon-btn { width: 22px; height: 22px; }
+/* 包管理器标识:底部面板左侧单独显示,等宽字体小胶囊,点击可改 */
+.run-pkg-badge {
+  flex: none; font-family: var(--mono); font-size: 11px; line-height: 1;
+  color: var(--accent-bright); background: var(--accent-faint);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 7px; cursor: pointer;
+}
+.run-pkg-badge:hover { border-color: var(--accent); }
 .run-log-footer {
   flex: none; display: flex; justify-content: flex-end; align-items: center;
   min-height: 28px; padding: 0 10px; border-top: 1px solid var(--border);
