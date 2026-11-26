@@ -94,6 +94,10 @@ src-tauri/src/      后端
 - 生成提交信息时，超过 60 KB 的 diff 会被截断；冲突文件的 AI 处理上限默认 80 KB，可在「设置 → AI → AI 解决冲突文件大小上限」中按模型上下文窗口调整（8–2048 KB），超限文件需手动解决。调高上限后若模型上下文不足，AI 输出可能被截断，此时工具会拒绝写回并提示手动处理。
 - 远端需要凭证时复用系统 git 凭据助手（macOS Keychain / Windows Credential Manager）；尊重仓库 hooks，不使用 `--no-verify`。
 
+## 友链
+
+- [LINUX DO](https://linux.do/) — 一个聚焦 AI 与技术的中文社区
+
 ## 贡献与协议
 
 欢迎 Issue 和 PR，请先阅读 [贡献指南](CONTRIBUTING.md)。项目采用 [MIT](LICENSE) 协议 © Bavoch。
