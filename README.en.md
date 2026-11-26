@@ -91,7 +91,7 @@ src-tauri/src/      Backend
 
 > ⚠️ This project is 100% AI-developed: architecture, implementation, iteration and fixes are all done by AI; humans only confirm requirements and accept results. It may contain uncovered edge cases or features without thorough real-world testing — use with caution in production and back up important data. Please open an [Issue](https://github.com/AceyKubbo/oh-my-gitty/issues) if you find a problem 🐱
 
-- Diffs over 60 KB are truncated before being sent for AI commit messages; conflict files over 80 KB need manual resolution.
+- Diffs over 60 KB are truncated before being sent for AI commit messages; the AI conflict-file limit defaults to 80 KB and is configurable under Settings → AI → AI conflict file size limit (8–2048 KB) to match your model's context window; larger files need manual resolution. If the limit exceeds the model's context, AI output may be truncated — in that case the tool refuses to write it back and asks for manual resolution.
 - Remote credentials are delegated to the system git helper (macOS Keychain / Windows Credential Manager); repository hooks are respected and `--no-verify` is never used.
 
 ## Contributing & license

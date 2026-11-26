@@ -542,6 +542,11 @@
                 <datalist id="cli-model-list"></datalist>
               </label>
             </div>
+            <label class="field">
+              <span>AI 解决冲突文件大小上限（KB）</span>
+              <input id="set-max-conflict-kb" type="number" min="8" max="2048" step="1" placeholder="80" />
+              <span class="dlg-hint">超过该大小的冲突文件将提示手动解决。请根据模型的上下文窗口调整；过大可能导致输出被截断（默认 80，范围 8–2048）。</span>
+            </label>
             <div class="field ai-test-field">
               <span class="field-row">
                 连接测试

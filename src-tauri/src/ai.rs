@@ -3,7 +3,12 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const MAX_CONFLICT_FILE_BYTES: usize = 80_000;
+/// AI 解决冲突时允许处理的文件大小上限(KB)。
+/// 默认值兼顾常见模型上下文窗口;用户可在设置中按模型能力提升。
+pub const DEFAULT_MAX_CONFLICT_FILE_KB: u32 = 80;
+/// 设置项允许的取值区间(KB),防止误填 0 或超大值导致请求超限。
+pub const MIN_MAX_CONFLICT_FILE_KB: u32 = 8;
+pub const MAX_MAX_CONFLICT_FILE_KB: u32 = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AiConfig {
@@ -30,6 +35,9 @@ pub struct AiConfig {
     /// 自定义提示词模板(占位符:{diff} {log} {lang})
     #[serde(default)]
     pub custom_prompt: String,
+    /// AI 解决冲突时允许处理的文件大小上限(KB),按模型上下文窗口调整
+    #[serde(default = "default_max_conflict_file_kb")]
+    pub max_conflict_file_kb: u32,
 }
 
 fn default_ai_mode() -> String {
@@ -42,6 +50,23 @@ fn default_commit_mode() -> String {
 
 fn default_preset() -> String {
     "conventional".into()
+}
+
+fn default_max_conflict_file_kb() -> u32 {
+    DEFAULT_MAX_CONFLICT_FILE_KB
+}
+
+/// 把用户配置的上限收敛到合法区间;非法/越界值回落到默认值。
+/// 返回字节数,供 resolve_conflict_file 直接比较。
+pub fn max_conflict_file_bytes(cfg: &AiConfig) -> usize {
+    let kb = if cfg.max_conflict_file_kb < MIN_MAX_CONFLICT_FILE_KB
+        || cfg.max_conflict_file_kb > MAX_MAX_CONFLICT_FILE_KB
+    {
+        DEFAULT_MAX_CONFLICT_FILE_KB
+    } else {
+        cfg.max_conflict_file_kb
+    };
+    kb as usize * 1024
 }
 
 impl Default for AiConfig {
@@ -57,6 +82,7 @@ impl Default for AiConfig {
             commit_mode: default_commit_mode(),
             prompt_preset: default_preset(),
             custom_prompt: String::new(),
+            max_conflict_file_kb: default_max_conflict_file_kb(),
         }
     }
 }
@@ -1041,8 +1067,13 @@ pub async fn resolve_conflict_file(cfg: &AiConfig, repo: &str, path: &str) -> Re
     let full = Path::new(repo).join(path);
     let content = std::fs::read_to_string(&full)
         .map_err(|e| format!("读取 {path} 失败： {e}"))?;
-    if content.len() > MAX_CONFLICT_FILE_BYTES {
-        return Err(format!("{path} 过大（{}KB），超出 AI 处理上限，请手动解决", content.len() / 1024));
+    let limit = max_conflict_file_bytes(cfg);
+    if content.len() > limit {
+        return Err(format!(
+            "{path} 过大（{}KB），超出 AI 处理上限（{}KB，可在设置中调整），请手动解决",
+            content.len() / 1024,
+            limit / 1024
+        ));
     }
     if !content.contains("<<<<<<<") && !content.contains("=======") {
         // 无冲突标记(例如文件级删除冲突),跳过
@@ -1053,8 +1084,32 @@ pub async fn resolve_conflict_file(cfg: &AiConfig, repo: &str, path: &str) -> Re
     let resolved = chat(cfg, repo, system, &user).await?;
     // 防御:AI 可能再次包上代码块
     let resolved = clean_markdown(resolved);
+    // 防御:校验 AI 输出完整性,避免把截断/未解决的内容写回并暂存,悄悄破坏代码。
+    validate_resolved(&resolved, &content, path)?;
     std::fs::write(&full, resolved).map_err(|e| format!("写入 {path} 失败： {e}"))?;
     git::stage_file(repo, path)?;
+    Ok(())
+}
+
+/// 校验 AI 解决冲突的输出:不得为空、不得残留冲突标记、不得明显被截断。
+/// 任何一项不通过都返回错误,调用方不会写回文件(保留原冲突状态供手动处理)。
+fn validate_resolved(resolved: &str, original: &str, path: &str) -> Result<(), String> {
+    if resolved.trim().is_empty() {
+        return Err(format!("{path}：AI 返回了空内容，未做改动，请手动解决"));
+    }
+    if resolved.contains("<<<<<<<") || resolved.contains("=======") || resolved.contains(">>>>>>>") {
+        return Err(format!("{path}：AI 输出仍含冲突标记，未做改动，请手动解决"));
+    }
+    // 内容骤减意味着输出可能被上下文窗口截断(提升上限后风险更高)。
+    // 注意不能用行数:冲突标记本身会重复 ours/theirs 行,合法解决后行数本就会明显减少。
+    // 改用字符数且阈值放宽到 25%,只拦截「只输出了开头一小段」这种严重截断。
+    if original.len() > 0 && resolved.len() * 4 < original.len() {
+        return Err(format!(
+            "{path}：AI 输出疑似被截断（原 {} 字符，输出 {} 字符），未做改动，请手动解决",
+            original.len(),
+            resolved.len()
+        ));
+    }
     Ok(())
 }
 
@@ -1111,6 +1166,39 @@ mod tests {
     fn lang_instruction_both() {
         assert!(lang_instruction("中文").contains("简体中文"));
         assert!(lang_instruction("英文").contains("English"));
+    }
+
+    #[test]
+    fn conflict_limit_default_and_clamp() {
+        let mut cfg = AiConfig::default();
+        assert_eq!(cfg.max_conflict_file_kb, DEFAULT_MAX_CONFLICT_FILE_KB);
+        assert_eq!(max_conflict_file_bytes(&cfg), DEFAULT_MAX_CONFLICT_FILE_KB as usize * 1024);
+
+        // 合法值生效
+        cfg.max_conflict_file_kb = 200;
+        assert_eq!(max_conflict_file_bytes(&cfg), 200 * 1024);
+
+        // 越界/非法值回落到默认,绝不返回 0
+        cfg.max_conflict_file_kb = 0;
+        assert_eq!(max_conflict_file_bytes(&cfg), DEFAULT_MAX_CONFLICT_FILE_KB as usize * 1024);
+        cfg.max_conflict_file_kb = 9999;
+        assert_eq!(max_conflict_file_bytes(&cfg), DEFAULT_MAX_CONFLICT_FILE_KB as usize * 1024);
+    }
+
+    #[test]
+    fn validate_resolved_rejects_bad_output() {
+        let original = "line one\nline two\nline three\nline four\n";
+        // 残留冲突标记
+        assert!(validate_resolved("line one\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> other\nline four\n", original, "f.txt").is_err());
+        // 空输出
+        assert!(validate_resolved("   \n", original, "f.txt").is_err());
+        // 严重截断(仅输出开头一小段)
+        assert!(validate_resolved("line one\n", original, "f.txt").is_err());
+        // 正常输出通过
+        assert!(validate_resolved("line one\nline two changed\nline three\nline four\n", original, "f.txt").is_ok());
+        // 合法解决时行数因去掉重复的 ours/theirs 而减少,但字符数接近,不应误判
+        let with_markers = "<<<<<<< HEAD\nline one\n=======\nline one alt\n>>>>>>> other\nline two\nline three\nline four\n";
+        assert!(validate_resolved("line one\nline two\nline three\nline four\n", with_markers, "f.txt").is_ok());
     }
 
     #[test]

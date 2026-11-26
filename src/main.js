@@ -151,6 +151,7 @@ function openSettings() {
   $("set-cli-model").value = settings.ai.mode === "cli" ? (settings.ai.model || "") : "";
   $("set-commit-mode").value = settings.ai.commit_mode || "auto";
   $("set-custom-prompt").value = settings.ai.custom_prompt || "";
+  $("set-max-conflict-kb").value = settings.ai.max_conflict_file_kb ?? DEFAULT_AI.max_conflict_file_kb;
   $("ai-test-status").textContent = "点击按钮验证当前配置是否可用";
   $("ai-test-status").className = "ai-test-status";
   // 已保存的 CLI 选择先按保存值回显;扫描完成后若已不在结果中会被清掉
@@ -183,6 +184,13 @@ function collectAiConfig() {
   if (mode === "cli" && !cliSel) {
     return { error: "请先扫描并选择一个 CLI 工具" };
   }
+  const rawLimit = Number($("set-max-conflict-kb").value);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.trunc(rawLimit)
+    : DEFAULT_AI.max_conflict_file_kb;
+  if (limit < 8 || limit > 2048) {
+    return { error: "冲突文件上限需在 8–2048 KB 之间" };
+  }
   return {
     config: {
       ...settings.ai, // 保留表单外字段(如 prompt_preset)
@@ -198,6 +206,7 @@ function collectAiConfig() {
       lang: "中文", // 语言配置已从 UI 移除,固定中文(后端反序列化需要该字段)
       commit_mode: $("set-commit-mode").value,
       custom_prompt: $("set-custom-prompt").value,
+      max_conflict_file_kb: limit,
     },
   };
 }

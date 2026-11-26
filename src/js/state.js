@@ -5,7 +5,7 @@ export const { listen } = window.__TAURI__.event;
 
 export const $ = (id) => document.getElementById(id);
 
-export const DEFAULT_AI = { base_url: "https://api.deepseek.com", api_key: "", model: "deepseek-v4-flash", mode: "api", cli_tool: "", cli_path: "", lang: "中文", commit_mode: "auto", custom_prompt: "" };
+export const DEFAULT_AI = { base_url: "https://api.deepseek.com", api_key: "", model: "deepseek-v4-flash", mode: "api", cli_tool: "", cli_path: "", lang: "中文", commit_mode: "auto", custom_prompt: "", max_conflict_file_kb: 80 };
 export const STATUS_CHARS = { A: "A", M: "M", D: "D", R: "R", C: "C", U: "?", "?": "?" };
 
 // 主题明暗:缺省跟随当前系统偏好;数据键是 CSS [data-theme] 期望值
