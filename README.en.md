@@ -17,14 +17,14 @@
 
 | Area | What you can do |
 | --- | --- |
-| Overview & repos | Dashboard with KPI cards, a one-year commit heatmap, 7-day code-volume chart, project-type breakdown and searchable/sortable/filterable project cards; open, clone, drag-and-drop or reorder repositories, and initialize a plain folder with `git init`; opening a non-repo folder recursively scans its children and adds discovered Git repos as a submodule-like collapsible tree (no superproject pointer to worry about); live sidebar status (branch, ahead/behind, change count), collapsible/resizable with a "dirty only" filter |
-| Submodules / worktrees | Expandable submodule tree with a hint on whether the superproject's gitlink pointer is committed; opening any worktree automatically imports every worktree of the same repo, with sidebar badges distinguishing the main repo from linked ones |
-| Workspace & code view | Conflicts/staged/changes groups shown as file trees with batch stage/unstage/ignore by directory, inline diffs and two-step discard confirmation; a full `.gitignore` editor that untracks newly ignored files, plus automatic status refresh on local file changes; a right-hand editor with diff / code / three-way merge tabs, an independent dark mode for code and resizable width |
-| Commits & AI | Commit staged changes only; AI streams editable Conventional Commits messages with direct-commit or confirm-first modes, custom extra instructions and a config self-test; OpenAI-compatible APIs plus local CLIs including Claude Code, Codex, Gemini, Qwen, Ollama, Crush and OpenCode; conflicts can be resolved by AI individually or in bulk, completing the merge automatically |
-| History & branches | Combined local + remote timeline; expand a commit to see changed files and per-file diffs or file content at that revision, with confirmed reset to any version; switch, merge, compare and cherry-pick branches, with AI or manual conflict resolution and continue/abort |
-| Sync & project versions | Automatic handling of branches without upstreams and silent background fetch; refspec push of the current branch to another remote branch (optional `--force-with-lease`); one-click detection and bump of project version files (package.json, Cargo.toml, pyproject.toml, pubspec.yaml, tauri.conf.json, …) keeping patch/minor/major consistent across files |
-| Run & appearance | Run panel detects launch commands and ports (npm/django/make/cargo/go…), start/stop with live logs, external-run detection and safe shutdown; dark/light themes with 7 auto-adapting accent colors, high-DPI auto scaling, always-on-top window and system tray |
-| Updates & terminal | Update check on startup with signature verification and one-step install (or manually under Settings → About & Update); the `gitty` command opens/focuses the app from any directory and switches to that project |
+| Overview & repos | Dashboard: KPIs, commit heatmap, code volume, project breakdown, searchable/filterable cards; open/clone/drag/reorder repos, `git init`; recursive sub-repo discovery; live sidebar + "dirty only" filter |
+| Submodules / worktrees | Submodule tree + gitlink pointer hint; worktrees of the same repo grouped automatically, main/linked badges |
+| Workspace & code view | Conflicts/staged/changes with batch directory actions; inline diffs, two-step discard, `.gitignore` editor; auto status refresh; diff/code/three-way merge views + independent dark mode |
+| Commits & AI | Stage-only commits; AI-streamed editable Conventional Commits (self-test/extra instructions); OpenAI-compatible APIs + local CLIs; AI conflict resolution with auto merge |
+| History & branches | Local + remote timeline, per-file diffs / revision content, confirmed reset; branch switch/merge/compare/cherry-pick, AI or manual conflict handling |
+| Sync & project versions | Upstream-less branch handling + silent fetch; refspec push (`--force-with-lease`); one-click batch bump of version files |
+| Run & appearance | Command/port detection, in-app start/stop + live logs; dark/light themes with 7 accents, high DPI, always-on-top and tray |
+| Updates & terminal | Startup update check + signature-verified install; `gitty` command opens/focuses the app from any directory |
 
 ## Quick start
 
