@@ -32,7 +32,17 @@ fn settings_load(app: tauri::AppHandle) -> Settings {
 
 #[tauri::command]
 fn settings_save(app: tauri::AppHandle, settings: Settings) -> Result<(), String> {
-    SettingsStore::new(&app).save(&settings)
+    let store = SettingsStore::new(&app);
+    // folder_groups 由后端 repos_add/remove/clear 维护。前端可能在添加分组前就加载了
+    // 旧 settings,随后保存时会用旧值覆盖刚写入的分组,导致递归发现的子仓库消失。
+    // 因此保存时始终以磁盘上的最新值为准,除非前端显式带来了更新的分组。
+    let mut merged = settings;
+    let on_disk = store.load();
+    if on_disk.folder_groups != merged.folder_groups {
+        // 前端值和磁盘值不同:磁盘是后端权威结果,直接采用
+        merged.folder_groups = on_disk.folder_groups;
+    }
+    store.save(&merged)
 }
 
 #[tauri::command]
@@ -969,11 +979,13 @@ fn repos_add(app: tauri::AppHandle, path: String) -> Result<RepoAddResult, Strin
     let (chosen, added) = add_path_with_discovery(&mut s, &path);
     store.save(&s)?;
     let is_folder_group = s.folder_groups.contains_key(&chosen);
+    let folder_groups = s.folder_groups.clone();
     Ok(RepoAddResult {
         repos: s.repos,
         path: chosen,
         added,
         is_folder_group,
+        folder_groups,
     })
 }
 
@@ -1035,6 +1047,10 @@ struct RepoAddResult {
     /// path 是否为「非仓库根目录 + 递归发现子仓库」的虚拟分组
     #[serde(default)]
     is_folder_group: bool,
+    /// 最新的虚拟分组映射。前端必须用它同步自己的 settings.folder_groups,
+    /// 否则随后的 settings_save 会用旧值把刚写入的分组覆盖掉。
+    #[serde(default)]
+    folder_groups: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// 启动时同步:把配置中已有项目所属的全部 worktree 补齐进项目列表。

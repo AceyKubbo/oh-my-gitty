@@ -101,6 +101,9 @@ export async function addRepoByPath(dir) {
   try {
     result = await invoke("repos_add", { path: dir });
     settings.repos = result.repos;
+    // 后端可能刚写入虚拟分组;必须同步到前端 settings,否则随后的 settings_save
+    // 会用旧值覆盖掉 folder_groups,导致子仓库叶子消失
+    if (result.folder_groups) settings.folder_groups = result.folder_groups;
   } catch (e) {
     toast("添加失败：" + e, false);
     // 失败:收起占位,回到空态
@@ -161,6 +164,7 @@ export async function doClone() {
     $("dlg-clone").classList.add("hidden");
     const result = await invoke("repos_add", { path: dest });
     settings.repos = result.repos;
+    if (result.folder_groups) settings.folder_groups = result.folder_groups;
     setRepo(result.path);
     settings.last_repo = result.path;
     try { await invoke("repos_set_current", { path: result.path }); } catch (_) {}

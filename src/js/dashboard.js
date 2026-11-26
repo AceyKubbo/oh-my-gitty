@@ -824,6 +824,8 @@ async function addProjects() {
     for (const path of paths) {
       const result = await invoke("repos_add", { path });
       settings.repos = result.repos;
+      // 同步后端刚写入的虚拟分组,避免后续 settings_save 用旧值覆盖掉 folder_groups
+      if (result.folder_groups) settings.folder_groups = result.folder_groups;
       if (result.added) added++;
     }
     await loadRepos(); // 总览态自动重渲染图表,侧栏列表同步更新
