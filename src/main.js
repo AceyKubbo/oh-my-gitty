@@ -393,6 +393,7 @@ function bindGlobalDismiss() {
       $("more-menu").classList.add("hidden");
       $("dash-more-menu").classList.add("hidden");
       hideEditor(); // ESC 收起右侧代码对比面板
+      $("dlg-run-settings").classList.add("hidden"); // 关闭运行设置(包管理器)弹窗
       closeCtxMenu();
       closeRunCtxMenu();
       closeRunMoreMenu();

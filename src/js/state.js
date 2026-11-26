@@ -27,7 +27,7 @@ export const ACCENTS = [
 export const DEFAULT_ACCENT = "purple";
 
 /* ===== 共享可变状态(setter 供跨模块重绑) ===== */
-export let settings = { ai: { ...DEFAULT_AI }, last_repo: null, repos: [], folder_groups: {}, run_commands: {}, run_urls: {}, run_history: [], run_hidden: {}, run_last: {}, diff_width: null, run_height: null, sidebar_dirty_only: false, sidebar_width: null, sidebar_collapsed: false, submodule_expanded: [], editor_dark: true, theme: DEFAULT_THEME, accent: DEFAULT_ACCENT };
+export let settings = { ai: { ...DEFAULT_AI }, last_repo: null, repos: [], folder_groups: {}, run_commands: {}, run_urls: {}, run_history: [], run_hidden: {}, run_pkg_manager: {}, run_last: {}, diff_width: null, run_height: null, sidebar_dirty_only: false, sidebar_width: null, sidebar_collapsed: false, submodule_expanded: [], editor_dark: true, theme: DEFAULT_THEME, accent: DEFAULT_ACCENT };
 export let repos = []; // 侧栏仓库摘要列表
 export let repo = null; // 当前仓库路径
 export let view = "repo"; // 主区视图:repo(单项目面板) | overview(多仓库总览)

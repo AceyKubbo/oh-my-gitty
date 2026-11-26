@@ -1124,6 +1124,8 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 .vb-level input { accent-color: var(--accent); flex: none; }
 .vb-level-main { flex: 1; }
 .vb-level-note { color: var(--text-dim); font-size: 12px; margin-left: 8px; }
+/* 运行设置弹窗:包管理器选项与脚本名/管理器展示统一用等宽字体 */
+#run-pkg-options .vb-level-main { font-family: var(--mono); font-size: 13px; }
 .vb-example { color: var(--text-dim); flex: none; font-size: 12px; }
 /* 更新弹窗说明区:纯文本展示发布说明,超高滚动 */
 .update-notes {
@@ -1400,6 +1402,8 @@ body.resizing-vertical { cursor: row-resize; user-select: none; -webkit-user-sel
 #run-panel.closed .run-log-footer { display: none; }
 .run-copy { color: var(--text-dim); }
 .run-copy:hover { color: var(--text); }
+.run-settings { color: var(--text-dim); }
+.run-settings:hover { color: var(--text); }
 .run-collapse svg { width: 12px; height: 12px; }
 /* 运行命令平铺栏:所有识别命令从左往右排列,超宽横向滚动(底部窄栏不占高度) */
 .run-cmds {

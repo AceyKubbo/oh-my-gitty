@@ -27,10 +27,22 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[derive(Default)]
 pub struct RunRegistry(pub Arc<Mutex<HashMap<String, (String, Child)>>>);
 
+/// 运行脚本信息:脚本名 + 应使用的包管理器(前端底部面板只显示这两项)。
+#[derive(Serialize, Clone)]
+pub struct RunScript {
+    /// scripts 里的键名,如 dev / build / dev:web
+    pub name: String,
+    /// 包管理器:npm | pnpm | bun(由当前项目设置指定,未指定时按 lockfile 自动识别)
+    pub manager: String,
+}
+
 #[derive(Serialize, Clone)]
 pub struct DetectResult {
     pub cmd: String,
     pub source: String,
+    /// 该命令对应的 npm 系脚本(仅 package.json scripts 命令有值,其余为 None)。
+    /// 前端据此在底部面板只展示「脚本名 + 包管理器」,隐藏冗长的 npm run … 全命令。
+    pub script: Option<RunScript>,
     /// 是否长驻服务(可停止):dev/serve/start 等运行类命令可停;
     /// build/test 等一次性命令跑完自退,前端不提供停止按钮
     pub stoppable: bool,
@@ -46,21 +58,40 @@ pub struct ServerStatus {
     pub command: Option<String>,
 }
 
+/// 根据 lockfile 猜测项目默认包管理器(pnpm > bun > npm);调用方传入的设置优先。
+/// 用于把「npm run dev」这类命令按用户选择的包管理器改写,并供前端展示脚本名。
+fn guess_manager(root: &Path) -> &'static str {
+    if root.join("pnpm-lock.yaml").exists() {
+        "pnpm"
+    } else if root.join("bun.lockb").exists() || root.join("bun.lock").exists() {
+        "bun"
+    } else {
+        "npm"
+    }
+}
+
 /// 按优先级扫描仓库根目录,收集全部可行的「运行服务器」命令候选(按发现顺序,cmd 去重)。
-pub fn detect_all(repo: &str) -> Vec<DetectResult> {
+/// manager: 用户为该项目指定的包管理器(npm/pnpm/bun);为空时按 lockfile 自动识别。
+/// cmd 始终是实际执行的完整命令(按 manager 改写),前端只展示 script 里的脚本名+管理器。
+pub fn detect_all(repo: &str, manager: &str) -> Vec<DetectResult> {
     let root = Path::new(repo);
     if !root.is_dir() {
         return Vec::new();
     }
+    let manager = match manager {
+        "npm" | "pnpm" | "bun" => manager.to_string(),
+        _ => guess_manager(root).to_string(),
+    };
     let mut out: Vec<DetectResult> = Vec::new();
     // 命令 -> 触发它的原始文本(scripts 原文等),供 default_port 推断默认端口
     let mut origins: HashMap<String, String> = HashMap::new();
-    let mut push = |cmd: String, source: String, stoppable: bool, ports: Vec<u16>, origin: &str| {
+    let mut push = |cmd: String, source: String, stoppable: bool, ports: Vec<u16>, origin: &str, script: Option<RunScript>| {
         if !out.iter().any(|d| d.cmd == cmd) {
             origins.insert(cmd.clone(), origin.to_string());
             out.push(DetectResult {
                 cmd,
                 source,
+                script,
                 stoppable,
                 ports,
             });
@@ -79,16 +110,24 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
                         .map(extract_ports)
                         .unwrap_or_default()
                 };
+                // 命令前缀:npm/pnpm/bun 统一用 "<manager> run <script>";
+                // 脚本名可能以 "dev:" 等开头,必须带 run 避免被当成 bun 内置子命令。
+                let run_prefix = format!("{manager} run");
+                let script_cmd = |k: &str| -> String { format!("{run_prefix} {k}") };
+                let script_info = |k: &str| -> Option<RunScript> {
+                    Some(RunScript { name: k.to_string(), manager: manager.clone() })
+                };
                 let mut found = false;
                 for key in ["dev", "serve", "start", "preview", "watch", "run", "debug"] {
                     if scripts.contains_key(key) {
                         let raw = scripts.get(key).and_then(|c| c.as_str()).unwrap_or("");
                         push(
-                            format!("npm run {key}"),
+                            script_cmd(key),
                             format!("package.json · scripts.{key}"),
                             true,
                             ports_of(key),
                             raw,
+                            script_info(key),
                         );
                         found = true;
                     }
@@ -96,11 +135,12 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
                 // Tauri 项目:scripts.tauri 惯例调用 tauri CLI,常用子命令是 dev
                 if scripts.contains_key("tauri") {
                     push(
-                        "npm run tauri dev".into(),
+                        script_cmd("tauri dev"),
                         "package.json · scripts.tauri (dev)".into(),
                         true,
                         Vec::new(),
                         "tauri",
+                        script_info("tauri dev"),
                     );
                     found = true;
                 }
@@ -117,11 +157,12 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
                 for k in prefixed {
                     let raw = scripts.get(k).and_then(|c| c.as_str()).unwrap_or("");
                     push(
-                        format!("npm run {k}"),
+                        script_cmd(k),
                         format!("package.json · scripts.{k}"),
                         true,
                         ports_of(k),
                         raw,
+                        script_info(k),
                     );
                     found = true;
                 }
@@ -130,11 +171,12 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
                     if let Some(first) = scripts.keys().next() {
                         let raw = scripts.get(first).and_then(|c| c.as_str()).unwrap_or("");
                         push(
-                            format!("npm run {first}"),
+                            script_cmd(first),
                             format!("package.json · scripts.{first}"),
                             false,
                             ports_of(first),
                             raw,
+                            script_info(first),
                         );
                     }
                 }
@@ -150,6 +192,7 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
             true,
             Vec::new(),
             "python manage.py runserver",
+            None,
         );
     }
 
@@ -165,6 +208,7 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
             true,
             Vec::new(),
             "docker compose up",
+            None,
         );
     }
 
@@ -184,33 +228,34 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
                         true,
                         Vec::new(),
                         &format!("make {t}"),
+                        None,
                     );
                     found = true;
                 }
             }
             if !found {
                 // 默认 target 多为构建,视为一次性
-                push("make".into(), "Makefile".into(), false, Vec::new(), "make");
+                push("make".into(), "Makefile".into(), false, Vec::new(), "make", None);
             }
         } else {
-            push("make".into(), "Makefile".into(), false, Vec::new(), "make");
+            push("make".into(), "Makefile".into(), false, Vec::new(), "make", None);
         }
     }
 
     // Rust
     if root.join("Cargo.toml").exists() {
-        push("cargo run".into(), "Cargo.toml".into(), true, Vec::new(), "cargo run");
+        push("cargo run".into(), "Cargo.toml".into(), true, Vec::new(), "cargo run", None);
     }
 
     // Go
     if root.join("go.mod").exists() {
-        push("go run .".into(), "go.mod".into(), true, Vec::new(), "go run .");
+        push("go run .".into(), "go.mod".into(), true, Vec::new(), "go run .", None);
     }
 
     // Node 入口
     for entry in ["index.js", "app.js", "server.js"] {
         if root.join(entry).exists() {
-            push("node .".into(), entry.into(), true, Vec::new(), "node .");
+            push("node .".into(), entry.into(), true, Vec::new(), "node .", None);
             break;
         }
     }
@@ -265,10 +310,10 @@ pub fn detect_all(repo: &str) -> Vec<DetectResult> {
     out
 }
 
-/// 单值入口:返回候选列表的第一个(供测试与未来单候选场景复用)
+/// 单值入口:返回候选列表的第一个(供测试与未来单候选场景复用),包管理器按 lockfile 自动识别
 #[allow(dead_code)]
 pub fn detect(repo: &str) -> Option<DetectResult> {
-    detect_all(repo).into_iter().next()
+    detect_all(repo, "").into_iter().next()
 }
 
 /// 端口探测结果:端口被占用即说明项目可能在外部(其他应用/终端)已启动
@@ -933,6 +978,32 @@ mod tests {
     }
 
     #[test]
+    fn detect_all_script_and_manager() {
+        // 命令按指定包管理器改写,script 字段只保留脚本名+管理器(供前端底部面板展示)
+        let d = tmpdir("pkg-mgr");
+        fs::write(
+            d.join("package.json"),
+            r#"{"scripts":{"dev":"vite","build":"tsc"}}"#,
+        )
+        .unwrap();
+        let list = detect_all(d.to_str().unwrap(), "pnpm");
+        let dev = list.iter().find(|x| x.cmd == "pnpm run dev").unwrap();
+        let s = dev.script.as_ref().unwrap();
+        assert_eq!(s.name, "dev");
+        assert_eq!(s.manager, "pnpm");
+        // bun 也统一走 "<manager> run <script>"
+        let list = detect_all(d.to_str().unwrap(), "bun");
+        assert!(list.iter().any(|x| x.cmd == "bun run dev"));
+        assert_eq!(list[0].script.as_ref().unwrap().manager, "bun");
+        // 非 npm 系命令(如 Makefile)无 script 字段
+        fs::write(d.join("Makefile"), "run:\n\techo hi\n").unwrap();
+        let list = detect_all(d.to_str().unwrap(), "npm");
+        let make = list.iter().find(|x| x.cmd == "make run").unwrap();
+        assert!(make.script.is_none());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
     fn windows_process_context_path_requires_boundaries() {
         let root = r"c:\work\oh-my-gitty";
         assert!(context_contains_path(
@@ -1025,7 +1096,7 @@ mod tests {
             r#"{"scripts":{"start":"x","dev":"vite","serve":"vite --host","build":"tsc"}}"#,
         )
         .unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let cmds: Vec<_> = r.iter().map(|x| x.cmd.as_str()).collect();
         assert_eq!(cmds, ["npm run dev", "npm run serve", "npm run start"]); // 按 dev→serve→start 顺序
         fs::remove_dir_all(&d).ok();
@@ -1035,7 +1106,7 @@ mod tests {
     fn detect_all_first_script_fallback() {
         let d = tmpdir("pkgfallback");
         fs::write(d.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].cmd, "npm run build"); // 无运行类键时取第一个兜底
         fs::remove_dir_all(&d).ok();
@@ -1046,7 +1117,7 @@ mod tests {
         let d = tmpdir("mixed");
         fs::write(d.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
         fs::write(d.join("Makefile"), "run:\n\techo hi\n").unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let cmds: Vec<_> = r.iter().map(|x| x.cmd.as_str()).collect();
         assert_eq!(cmds, ["npm run dev", "make run"]); // 两种来源并存时全部收集
         fs::remove_dir_all(&d).ok();
@@ -1056,7 +1127,7 @@ mod tests {
     fn detect_all_makefile_multiple_targets() {
         let d = tmpdir("maketargets");
         fs::write(d.join("Makefile"), "dev:\n\techo dev\n\nrun:\n\techo run\n").unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let cmds: Vec<_> = r.iter().map(|x| x.cmd.as_str()).collect();
         assert_eq!(cmds, ["make run", "make dev"]); // 按 run→dev 优先级排序
         fs::remove_dir_all(&d).ok();
@@ -1070,7 +1141,7 @@ mod tests {
             r#"{"scripts":{"dev":"vite --port 1420","build":"vite build","preview":"vite preview","tauri":"tauri"}}"#,
         )
         .unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let cmds: Vec<_> = r.iter().map(|x| x.cmd.as_str()).collect();
         assert_eq!(
             cmds,
@@ -1087,7 +1158,7 @@ mod tests {
             r#"{"scripts":{"dev:web":"vite --port 5173","start:api":"tsx api/index.ts","build":"tsc"}}"#,
         )
         .unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let cmds: Vec<_> = r.iter().map(|x| x.cmd.as_str()).collect();
         assert_eq!(cmds, ["npm run dev:web", "npm run start:api"]); // 前缀键按名排序
         fs::remove_dir_all(&d).ok();
@@ -1104,7 +1175,7 @@ mod tests {
             r#"{"scripts":{"dev":"vite","build":"vite build","preview":"vite preview"}}"#,
         )
         .unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let dev = r.iter().find(|x| x.cmd == "npm run dev").unwrap();
         let preview = r.iter().find(|x| x.cmd == "npm run preview").unwrap();
         assert!(dev.ports.contains(&5173), "dev 命令应归因 vite 默认端口,实际 {:?}", dev.ports);
@@ -1128,7 +1199,7 @@ mod tests {
             r#"{"devUrl":"http://localhost:1421"}"#,
         )
         .unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         assert_eq!(r.len(), 1);
         assert!(
             r[0].ports.contains(&1421),
@@ -1153,7 +1224,7 @@ mod tests {
             r#"{"devUrl":"http://localhost:1421"}"#,
         )
         .unwrap();
-        let r = detect_all(d.to_str().unwrap());
+        let r = detect_all(d.to_str().unwrap(), "");
         let tauri_dev = r.iter().find(|x| x.cmd == "npm run tauri dev").unwrap();
         assert!(
             tauri_dev.ports.contains(&1421),

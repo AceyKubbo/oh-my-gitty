@@ -22,6 +22,16 @@ let runAllCmds = [];    // 未过滤的完整候选(隐藏命令菜单用)
 let runBusy = false;  // 当前仓库启动/停止进行中,防重复触发
 let runCtxCmd = null; // 运行命令右键菜单的目标命令(仅菜单打开期间有效)
 
+// 当前仓库选定的包管理器(未保存时返回空串,交给后端按 lockfile 自动识别)
+export function currentManager(path = repo) {
+  return (settings.run_pkg_manager || {})[path] || "";
+}
+
+// chip 展示文案:package.json 脚本只显示「脚本名 + 包管理器」,其余(非 npm 系)显示完整命令
+function chipLabel(it) {
+  return it.script ? `${it.script.name}  ${it.script.manager}` : it.cmd;
+}
+
 // 当前仓库已隐藏的命令集合(settings.run_hidden[repo])
 function hiddenCmds() {
   return new Set((settings.run_hidden || {})[repo] || []);
@@ -189,7 +199,7 @@ function renderRunCmds() {
       : '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>';
     const t = document.createElement("span");
     t.className = "run-chip-cmd";
-    t.textContent = it.cmd;
+    t.textContent = chipLabel(it);
     b.append(icon, t);
     if (isOn) {
       b.classList.add("running");
@@ -204,6 +214,8 @@ function renderRunCmds() {
       b.classList.add("disabled");
       b.title = `端口 ${ext.map((p) => p.port).join("、")} 已被占用，可能已在外部运行`;
     }
+    // 悬停仍可看到实际执行的完整命令(展示精简,信息不丢失)
+    b.title = (b.title ? b.title + " · " : "") + it.cmd;
     b.addEventListener("click", () => chipClick(it, extHit, extFallbackOn));
     b.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -286,9 +298,9 @@ export function syncRunPanel() {
     renderRunLog();
     return;
   }
-  // 智能识别:候选填入平铺栏(隐藏的命令已过滤)
+  // 智能识别:候选填入平铺栏(隐藏的命令已过滤,命令按选定包管理器生成)
   const detectRepo = repo;
-  invoke("server_detect", { repo }).then((list) => {
+  invoke("server_detect", { repo, manager: currentManager(repo) }).then((list) => {
     if (detectRepo !== repo) return; // 已切换仓库,丢弃过期结果
     runAllCmds = list || [];
     runCmdOptions = applyHidden(runAllCmds);
@@ -362,7 +374,23 @@ export function runLastFor(path) {
 
 // 供总览卡片使用:探测某仓库的全部识别候选(未缓存,每次调用拉取;隐藏仅作用于运行栏,不影响总览)
 export function detectCommandsFor(path) {
-  return invoke("server_detect", { repo: path }).then((list) => list || []).catch(() => []);
+  return invoke("server_detect", { repo: path, manager: currentManager(path) }).then((list) => list || []).catch(() => []);
+}
+
+// 切换某仓库的包管理器:持久化后刷新当前仓库的运行栏(dashboard 卡片的下拉框下次渲染时自动更新)
+export function setPkgManager(path, manager) {
+  settings.run_pkg_manager = settings.run_pkg_manager || {};
+  if (manager) settings.run_pkg_manager[path] = manager;
+  else delete settings.run_pkg_manager[path];
+  invoke("settings_save", { settings }).catch(() => {});
+  if (path === repo) {
+    // 当前项目:重新识别命令(按新管理器改写),运行中命令不变则不打断
+    invoke("server_detect", { repo, manager: currentManager(repo) }).then((list) => {
+      runAllCmds = list || [];
+      runCmdOptions = applyHidden(runAllCmds);
+      renderRunCmds();
+    }).catch(() => {});
+  }
 }
 
 // 供总览卡片使用:某仓库当前运行中的命令文本(未运行为 null)
@@ -379,7 +407,7 @@ export async function startServerFor(path, cmd) {
   if (!cmd) cmd = (settings.run_commands[path] || "").trim();
   if (!cmd) {
     try {
-      const list = await invoke("server_detect", { repo: path });
+      const list = await invoke("server_detect", { repo: path, manager: currentManager(path) });
       if (list && list.length && list[0].cmd) {
         cmd = list[0].cmd;
         settings.run_commands[path] = cmd;
@@ -555,10 +583,49 @@ function restoreCmds() {
   renderRunCmds();
 }
 
+/* ===== 运行设置弹窗(包管理器) ===== */
+// 打开:回显当前工程已保存的包管理器(未保存时按 lockfile 自动识别的结果,用后端探测回填)
+let runPkgChosen = "npm";
+function openRunSettings() {
+  if (!repo) { toast("请先选择一个项目", false); return; }
+  closeRunCtxMenu();
+  closeRunMoreMenu();
+  $("run-settings-proj").textContent = repo;
+  // 未显式保存时,用当前识别到的第一条命令里的管理器作为默认选中项
+  const saved = ((settings.run_pkg_manager || {})[repo] || "");
+  const detected = runAllCmds.find((it) => it.script)?.script?.manager || "npm";
+  runPkgChosen = saved || detected;
+  for (const el of document.querySelectorAll('input[name="run-pkg"]')) {
+    el.checked = el.value === runPkgChosen;
+  }
+  $("dlg-run-settings").classList.remove("hidden");
+}
+function closeRunSettings() {
+  $("dlg-run-settings").classList.add("hidden");
+}
+function saveRunPkgManager() {
+  const chosen = runPkgChosen;
+  closeRunSettings();
+  if (!repo) return;
+  const before = currentManager(repo);
+  setPkgManager(repo, chosen);
+  toast(chosen === before ? "包管理器未变更" : `已设为 ${chosen}`, true);
+}
+
 /* ===== 事件绑定 ===== */
 export function bindRunEvents() {
   $("btn-run-collapse").addEventListener("click", toggleRunPanel);
   $("btn-run-copy").addEventListener("click", copyRunLog);
+  $("btn-run-settings").addEventListener("click", openRunSettings);
+  $("btn-run-settings-cancel").addEventListener("click", closeRunSettings);
+  $("btn-run-settings-save").addEventListener("click", saveRunPkgManager);
+  for (const el of document.querySelectorAll('input[name="run-pkg"]')) {
+    el.addEventListener("change", () => { runPkgChosen = el.value; });
+  }
+  // 背景遮罩点击关闭(与全局弹层一致性,仅点到 overlay 本身时收起)
+  $("dlg-run-settings").addEventListener("click", (e) => {
+    if (e.target === $("dlg-run-settings")) closeRunSettings();
+  });
   // 运行命令右键菜单:隐藏/取消隐藏、恢复全部(先取值再关闭,防全局 click 抢先收菜单)
   $("run-ctx-hide").addEventListener("click", () => {
     const cmd = runCtxCmd;

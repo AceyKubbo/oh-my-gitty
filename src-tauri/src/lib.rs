@@ -2216,10 +2216,12 @@ async fn ai_cli_scan() -> Vec<ai::CliToolInfo> {
 }
 
 /// 智能识别仓库的全部「运行服务器」命令候选(按优先级排序)
+/// manager: 用户为该项目指定的包管理器(npm/pnpm/bun),为空时按 lockfile 自动识别
 #[tauri::command]
-async fn server_detect(repo: String) -> Vec<runner::DetectResult> {
+async fn server_detect(repo: String, manager: Option<String>) -> Vec<runner::DetectResult> {
     let r = repo.clone();
-    tauri::async_runtime::spawn_blocking(move || runner::detect_all(&r))
+    let m = manager.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || runner::detect_all(&r, &m))
         .await
         .unwrap_or_default()
 }

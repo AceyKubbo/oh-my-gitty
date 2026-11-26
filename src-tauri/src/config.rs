@@ -57,6 +57,9 @@ pub struct Settings {
     /// 每个仓库隐藏的运行命令(路径 -> 命令列表)
     #[serde(default)]
     pub run_hidden: std::collections::HashMap<String, Vec<String>>,
+    /// 每个仓库使用的包管理器(路径 -> npm | pnpm | bun),未设置时按 lockfile 自动识别
+    #[serde(default)]
+    pub run_pkg_manager: std::collections::HashMap<String, String>,
     /// 每个仓库最近一次运行时间(Unix 毫秒时间戳)
     #[serde(default)]
     pub run_last: std::collections::HashMap<String, u64>,
