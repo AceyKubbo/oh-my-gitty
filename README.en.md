@@ -96,7 +96,7 @@ src-tauri/src/      Backend
 
 ## Friendly links
 
-- [LINUX DO](https://linux.do/) — a Chinese community focused on AI and technology
+- [LINUX DO](https://linux.do/) — a Chinese community focused on AI and technology. Thanks to all the folks there for your technical support and feedback — this project is better because of you 🐱
 
 ## Contributing & license
 

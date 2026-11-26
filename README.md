@@ -96,7 +96,7 @@ src-tauri/src/      后端
 
 ## 友链
 
-- [LINUX DO](https://linux.do/) — 一个聚焦 AI 与技术的中文社区
+- [LINUX DO](https://linux.do/) — 一个聚焦 AI 与技术的中文社区，感谢各位佬友的技术支持与反馈，这个项目因你们而更好 🐱
 
 ## 贡献与协议
 
