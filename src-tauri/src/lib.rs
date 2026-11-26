@@ -487,6 +487,81 @@ mod tests {
     }
 
     #[test]
+    fn order_worktree_groups_puts_main_before_its_worktrees() {
+        // (路径, 分组键, 是否主仓库)
+        let mut items = vec![
+            ("A".to_string(), None, false),
+            ("wt2".to_string(), Some("g1".to_string()), false),
+            ("B".to_string(), None, false),
+            ("main1".to_string(), Some("g1".to_string()), true),
+            ("wt1".to_string(), Some("g1".to_string()), false),
+            ("main2".to_string(), Some("g2".to_string()), true),
+            ("wt3".to_string(), Some("g2".to_string()), false),
+        ];
+        order_worktree_groups(&mut items, |it| it.1.clone().map(|k| (k, it.2)));
+        let paths: Vec<&str> = items.iter().map(|i| i.0.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["A", "main1", "wt2", "wt1", "B", "main2", "wt3"],
+            "主仓库应排在最前,从属工作树紧随其后,且分组落在原最早出现位置"
+        );
+    }
+
+    #[test]
+    fn order_real_worktrees_main_first_from_scrambled_list() {
+        let base = std::env::temp_dir().join(format!("ohmygitty-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let m = base.to_str().unwrap();
+        git::run_git(m, &["init", "-q"]).unwrap();
+        git::run_git(m, &["config", "user.email", "t@e.com"]).unwrap();
+        git::run_git(m, &["config", "user.name", "t"]).unwrap();
+        std::fs::write(base.join("a.txt"), "x").unwrap();
+        git::stage_all(m).unwrap();
+        git::commit(m, "init").unwrap();
+        let w1 = std::env::temp_dir().join(format!("ohmygitty-order-w1-{}", std::process::id()));
+        let w2 = std::env::temp_dir().join(format!("ohmygitty-order-w2-{}", std::process::id()));
+        for (w, b) in [(&w1, "dev1"), (&w2, "dev2")] {
+            let _ = std::fs::remove_dir_all(w);
+            git::run_git(m, &["worktree", "add", "-b", b, w.to_str().unwrap()]).unwrap();
+        }
+
+        // 故意打乱:从属工作树在前、无关项目居中、主仓库在后
+        let paths = vec![
+            w1.to_string_lossy().to_string(),
+            "/unrelated".to_string(),
+            m.to_string(),
+            w2.to_string_lossy().to_string(),
+        ];
+        let mut items: Vec<(String, Option<(String, bool)>)> = paths
+            .iter()
+            .map(|p| {
+                let wt = git::worktrees(p);
+                if wt.entries.len() > 1 {
+                    let key = path_key(&wt.main_path);
+                    let is_main = path_key(p) == key;
+                    (p.clone(), Some((key, is_main)))
+                } else {
+                    (p.clone(), None)
+                }
+            })
+            .collect();
+        order_worktree_groups(&mut items, |it| it.1.clone());
+
+        let order: Vec<&str> = items.iter().map(|i| i.0.as_str()).collect();
+        assert_eq!(order[0], m, "主仓库应被提到分组最前(原最早出现位置)");
+        assert!(order[1] == w1.to_str().unwrap() || order[1] == w2.to_str().unwrap());
+        assert!(order[2] == w1.to_str().unwrap() || order[2] == w2.to_str().unwrap());
+        assert_eq!(order[3], "/unrelated", "无关项目相对位置不变");
+
+        for (w, _) in [(&w1, "dev1"), (&w2, "dev2")] {
+            git::run_git(m, &["worktree", "remove", w.to_str().unwrap()]).ok();
+            std::fs::remove_dir_all(w).ok();
+        }
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
     fn normalizes_platform_paths_for_repo_identity() {
         let normalized = normalize(r"C:\Work\Hello-Gitty\");
         if cfg!(windows) {
@@ -812,7 +887,19 @@ async fn repos_status_all(app: tauri::AppHandle) -> Vec<RepoSummary> {
                 out.push((i, sum));
             }
             out.sort_by_key(|(i, _)| *i);
-            out.into_iter().map(|(_, sum)| sum).collect()
+            let mut sums: Vec<RepoSummary> = out.into_iter().map(|(_, sum)| sum).collect();
+            // 自动排序:worktree 组的主仓库在前,其它分支(工作树)紧随其后
+            order_worktree_groups(&mut sums, |s| {
+                let wt = &s.worktree;
+                if wt.entries.len() > 1 {
+                    let key = path_key(&wt.main_path);
+                    let is_main = path_key(&s.path) == key;
+                    Some((key, is_main))
+                } else {
+                    None
+                }
+            });
+            sums
         })
     })
     .await
@@ -961,6 +1048,20 @@ fn repos_sync_worktrees(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     for p in &paths {
         expand_repo_paths(&mut s.repos, p);
     }
+    // 基于最终列表收集分组信息(覆盖本次新带入的 worktree),再把顺序规范化:
+    // 主仓库在前,从属工作树紧随其后。
+    let mut groups: std::collections::HashMap<String, (String, bool)> =
+        std::collections::HashMap::new();
+    for p in &s.repos {
+        let wt = git::worktrees(p);
+        if wt.entries.len() > 1 {
+            let key = path_key(&wt.main_path);
+            for e in &wt.entries {
+                groups.insert(path_key(&e.path), (key.clone(), path_key(&e.path) == key));
+            }
+        }
+    }
+    order_worktree_groups(&mut s.repos, |p| groups.get(&path_key(p)).cloned());
     if s.repos != before {
         store.save(&s)?;
     }
@@ -1128,6 +1229,58 @@ fn merge_repo_paths(repos: &mut Vec<String>, ordered: &[String]) {
             None => repos.push(p.clone()),
         }
     }
+}
+
+/// 按 worktree 分组重排列表:每组的主仓库排在最前,从属工作树紧随其后。
+/// 分组整体落在「组内成员原先最早出现的位置」,不打扰其它项目的相对顺序。
+/// group_of 返回 (分组键, 是否主仓库);返回 None 的条目不参与分组。
+fn order_worktree_groups<T, F>(items: &mut Vec<T>, group_of: F)
+where
+    F: Fn(&T) -> Option<(String, bool)>,
+{
+    let n = items.len();
+    let mut groups: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if let Some((key, _)) = group_of(it) {
+            groups.entry(key).or_default().push(i);
+        }
+    }
+    // 生成新顺序:主项优先,其余按原相对顺序跟随
+    let mut perm: Vec<usize> = Vec::with_capacity(n);
+    let mut emitted = vec![false; n];
+    for i in 0..n {
+        if emitted[i] {
+            continue;
+        }
+        match group_of(&items[i]).and_then(|(key, _)| groups.get(&key).cloned()) {
+            Some(members) => {
+                let mut ordered: Vec<usize> = members
+                    .iter()
+                    .copied()
+                    .filter(|&j| group_of(&items[j]).map(|(_, main)| main).unwrap_or(false))
+                    .collect();
+                for j in members {
+                    if !ordered.contains(&j) {
+                        ordered.push(j);
+                    }
+                }
+                for j in ordered {
+                    if !emitted[j] {
+                        perm.push(j);
+                        emitted[j] = true;
+                    }
+                }
+            }
+            None => {
+                perm.push(i);
+                emitted[i] = true;
+            }
+        }
+    }
+    let old = std::mem::take(items);
+    let mut by_index: std::collections::HashMap<usize, T> = old.into_iter().enumerate().collect();
+    *items = perm.into_iter().filter_map(|i| by_index.remove(&i)).collect();
 }
 
 #[tauri::command]
