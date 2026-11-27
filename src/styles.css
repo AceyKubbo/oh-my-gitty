@@ -1181,7 +1181,7 @@ body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none
 }
 .diff-title {
   flex: 1; min-width: 0; font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .4px;
+  letter-spacing: .4px;
   color: var(--text-head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* 版本历史联动时标志当前对比来源(如「对比 a1b2c3d → 当前」) */
