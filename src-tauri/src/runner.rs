@@ -361,49 +361,121 @@ fn extract_ports(cmd: &str) -> Vec<u16> {
     out
 }
 
-/// 从 vite.config 提取 server.port(扫描 "port" 冒号数字;该文件里 port 基本只出现在 server 块)
+/// 去掉代码/配置里的注释,避免注释中的 port 被误识别(如 `// port: 8080 备用`)
+fn strip_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_string: Option<char> = None;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if let Some(q) = in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(n) = chars.next() { out.push(n); }
+            } else if c == q {
+                in_string = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' | '`' => { in_string = Some(c); out.push(c); }
+            '/' if chars.peek() == Some(&'/') => {
+                // 行注释:吞到行尾
+                while let Some(&n) = chars.peek() {
+                    if n == '\n' { break; }
+                    chars.next();
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = '\0';
+                while let Some(n) = chars.next() {
+                    if prev == '*' && n == '/' { break; }
+                    prev = n;
+                }
+                out.push(' ');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// 从 vite.config 提取 server.port:先定位 `server:` 对象块,再在块内找第一个 `port:` 数字。
+/// 不再扫描全文任意 `port:`(proxy.target / 注释 / 其他插件配置里的端口会导致误报)。
 fn extract_config_port(text: &str) -> Option<u16> {
-    for (i, _) in text.match_indices("port") {
-        let rest = text[i + 4..].trim_start();
+    let clean = strip_comments(text);
+    // 定位 server 对象块的起始花括号(支持 server: { / "server": { / server = { 等写法)
+    let server_at = clean.find("server")?;
+    let after = &clean[server_at + "server".len()..];
+    let open = after.find('{')?;
+    let block = &after[open + 1..];
+    // 在 server 块内找 port: 数字(块通常很短,花括号嵌套极少;遇深层 } 即停)
+    let mut depth = 0usize;
+    let mut end = block.len();
+    for (i, c) in block.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 0 => { end = i; break; }
+            '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    parse_port_after_key(&block[..end], "port")
+}
+
+/// 在文本中查找 `key` 后跟冒号(可含引号包裹)再跟数字,返回第一个合法端口。
+fn parse_port_after_key(text: &str, key: &str) -> Option<u16> {
+    let mut from = 0;
+    while let Some(pos) = text[from..].find(key) {
+        let rest = &text[from + pos + key.len()..];
+        let rest = rest.trim_start();
+        // 跳过 key 的引号(如 "port": 3000)
+        let rest = rest.strip_prefix('"').or_else(|| rest.strip_prefix('\''))
+            .map(|r| r.trim_start())
+            .unwrap_or(rest);
         if let Some(rest) = rest.strip_prefix(':') {
-            let num: String = rest
-                .trim_start()
+            let num: String = rest.trim_start()
                 .chars()
                 .take_while(|c| c.is_ascii_digit())
                 .collect();
             if !num.is_empty() {
                 if let Ok(p) = num.parse::<u16>() {
-                    if p > 0 {
-                        return Some(p);
-                    }
+                    if p > 0 { return Some(p); }
                 }
             }
         }
+        from += pos + key.len();
     }
     None
 }
 
-/// 从 tauri.conf.json 的 devUrl(http://host:port) 提取端口
+/// 从 tauri.conf.json 的 devUrl(http://host:port) 提取端口。
+/// 只认 devUrl 字段的值,不再扫全文任意 http:// URL(插件配置等 URL 会导致误报)。
 fn extract_url_port(text: &str) -> Option<u16> {
+    let at = text.find("devUrl")?;
+    // 从 devUrl 起截取到该字段值的闭合引号,只在这一段里找 URL,
+    // 避免误取同一 JSON 里其他 URL(如插件配置里的 http://localhost:9999)
+    let after = &text[at + "devUrl".len()..];
+    let scheme_pos = after.find("http://").or_else(|| after.find("https://"))?;
+    let value = &after[scheme_pos..];
+    let value_end = value.find(['"', '\'']).unwrap_or(value.len());
+    let value = &value[..value_end];
     for scheme in ["http://", "https://"] {
-        let mut from = 0;
-        while let Some(pos) = text[from..].find(scheme) {
-            let start = from + pos + scheme.len();
-            if let Some(colon) = text[start..].find(':') {
-                let after = start + colon + 1;
-                let num: String = text[after..]
+        if let Some(pos) = value.find(scheme) {
+            let start = pos + scheme.len();
+            let host_port = &value[start..];
+            // 端口在最后一个冒号后(host 为 IPv6 时用 [::1]:port)
+            if let Some(colon) = host_port.rfind(':') {
+                let num: String = host_port[colon + 1..]
                     .chars()
                     .take_while(|c| c.is_ascii_digit())
                     .collect();
                 if !num.is_empty() {
                     if let Ok(p) = num.parse::<u16>() {
-                        if p > 0 {
-                            return Some(p);
-                        }
+                        if p > 0 { return Some(p); }
                     }
                 }
             }
-            from = start;
         }
     }
     None
@@ -437,15 +509,24 @@ pub fn collect_ports(repo: &str) -> Vec<(u16, &'static str)> {
     let root = Path::new(repo);
     let mut cands: Vec<(u16, &'static str)> = Vec::new();
 
-    // scripts 原文里的显式端口(命令候选只保留 `npm run dev` 包裹,端口在原文里)
+    // scripts 原文里的显式端口(命令候选只保留 `npm run dev` 包裹,端口在原文里)。
+    // 只统计「运行类」脚本(dev/start/serve/...),build/test 里的 --port 不是开发服务器端口。
+    let run_keys = ["dev", "serve", "start", "preview", "watch", "run", "debug"];
     let mut script_text = String::new();
     if let Ok(text) = std::fs::read_to_string(root.join("package.json")) {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
             if let Some(scripts) = v.get("scripts").and_then(|s| s.as_object()) {
-                for (_, cmd) in scripts {
+                for (key, cmd) in scripts {
+                    let key_lc = key.to_lowercase();
+                    let is_run = run_keys.contains(&key_lc.as_str())
+                        || run_keys.iter().any(|p| key_lc.starts_with(&format!("{p}:")));
                     if let Some(c) = cmd.as_str() {
-                        for p in extract_ports(c) {
-                            cands.push((p, "explicit"));
+                        // 端口参数只取运行类脚本;但所有脚本文本都纳入框架判定,
+                        // 便于 `dev` 间接调用框架时仍能兜底默认端口
+                        if is_run {
+                            for p in extract_ports(c) {
+                                cands.push((p, "explicit"));
+                            }
                         }
                         script_text.push_str(c);
                         script_text.push(' ');
@@ -765,6 +846,74 @@ fn spawn_shell(repo: &str, command: &str) -> std::io::Result<Child> {
         .spawn()
 }
 
+/// 去除终端 ANSI 转义序列(颜色/粗体/光标移动/终端标题等),避免日志面板显示成乱码。
+/// npm/vite 等开发服务器即便输出重定向到管道,仍常带 `\x1b[0m` 这类控制码;
+/// WebView 不会解释它们,原样显示就是一堆方块/乱码。
+fn strip_ansi(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            // 进度条用 \r 原地刷新:模拟终端行为,只保留最后一次的内容
+            if c == '\r' { out.clear(); } else { out.push(c); }
+            continue;
+        }
+        match chars.peek().copied() {
+            // CSI: ESC [ 参数字节(0x30-0x3F) / 中间字节(0x20-0x2F) / 最终字节(0x40-0x7E)
+            Some('[') => {
+                chars.next();
+                while let Some(&p) = chars.peek() {
+                    chars.next();
+                    if ('0'..='?').contains(&p) || (' '..='/').contains(&p) {
+                        continue; // 参数/中间字节,继续吞
+                    }
+                    break; // 最终字节,序列结束
+                }
+            }
+            // OSC/DCS 等: ESC ] P X ^ _ 后接字符串,以 BEL 或 ST(ESC \) 结束
+            Some(']') | Some('P') | Some('X') | Some('^') | Some('_') => {
+                chars.next();
+                while let Some(p) = chars.next() {
+                    if p == '\x07' { break; }
+                    if p == '\x1b' {
+                        if chars.peek() == Some(&'\\') { chars.next(); }
+                        break;
+                    }
+                }
+            }
+            // 其他单字符转义(ESC7 / ESC8 / ESCc 等):吞掉下一个字符
+            Some(_) => { chars.next(); }
+            None => {}
+        }
+    }
+    out
+}
+
+/// 逐行读取子进程输出并回推 `server-log`:先清 ANSI 控制码,再发给前端。
+/// 用 read_until + lossy 解码替代 lines():遇到非 UTF-8 字节(Windows 下中文 GBK 输出)
+/// 只替换个别字符,不会因一次 Err 中断整条日志流。
+fn emit_lines<R: std::io::Read>(reader: R, app: AppHandle, repo: String, stream: &'static str) {
+    let mut reader = std::io::BufReader::new(reader);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        let n = match reader.read_until(b'\n', &mut buf) {
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        if n == 0 { break; }
+        while buf.last().is_some_and(|c| *c == b'\n' || *c == b'\r') {
+            buf.pop();
+        }
+        let decoded = String::from_utf8_lossy(&buf);
+        let line = strip_ansi(&decoded);
+        let _ = app.emit(
+            "server-log",
+            serde_json::json!({ "repo": repo, "stream": stream, "line": line }),
+        );
+    }
+}
+
 /// 启动一条长驻命令,在仓库目录下经系统命令解释器执行;
 /// stdout / stderr 逐行经 `server-log` 事件回推,两端 EOF 后经 `server-status` 通知已停止。
 pub fn spawn_server(app: &AppHandle, repo: &str, command: &str) -> Result<(), String> {
@@ -803,13 +952,7 @@ pub fn spawn_server(app: &AppHandle, repo: &str, command: &str) -> Result<(), St
     if let Some(stream) = stdout {
         let pending = pending.clone();
         std::thread::spawn(move || {
-            let reader = std::io::BufReader::new(stream);
-            for line in reader.lines().map_while(Result::ok) {
-                let _ = app_out.emit(
-                    "server-log",
-                    serde_json::json!({ "repo": repo_out, "stream": "out", "line": line }),
-                );
-            }
+            emit_lines(stream, app_out.clone(), repo_out.clone(), "out");
             finalize(&pending, app_out, &repo_out);
         });
     } else {
@@ -824,13 +967,7 @@ pub fn spawn_server(app: &AppHandle, repo: &str, command: &str) -> Result<(), St
     if let Some(stream) = stderr {
         let pending = pending.clone();
         std::thread::spawn(move || {
-            let reader = std::io::BufReader::new(stream);
-            for line in reader.lines().map_while(Result::ok) {
-                let _ = app_err.emit(
-                    "server-log",
-                    serde_json::json!({ "repo": repo_err, "stream": "err", "line": line }),
-                );
-            }
+            emit_lines(stream, app_err.clone(), repo_err.clone(), "err");
             finalize(&pending, app_err, &repo_err);
         });
     } else {
@@ -942,7 +1079,10 @@ pub fn kill_all(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_ports, detect, detect_all, extract_ports, probe_port};
+    use super::{
+        collect_ports, detect, detect_all, extract_config_port, extract_ports,
+        extract_url_port, probe_port, strip_ansi,
+    };
     use super::context_contains_path;
     #[cfg(unix)]
     use super::{kill_process_group, process_alive};
@@ -1355,6 +1495,53 @@ mod tests {
     fn collect_ports_empty_none() {
         let d = tmpdir("portsnone");
         assert!(collect_ports(d.to_str().unwrap()).is_empty()); // 无 package.json / 配置文件 → 无端口
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn strip_ansi_removes_color_cursor_and_osc_codes() {
+        // 颜色/粗体 CSI 序列、光标上移、OSC 标题全部清掉
+        let raw = "\x1b[31mERROR\x1b[0m \x1b[1;32mOK\x1b[m \x1b[1A\x1b[K\x1b]0;title\x07done";
+        assert_eq!(strip_ansi(raw), "ERROR OK done");
+        // \r 原地刷新:只保留最后一次内容
+        assert_eq!(strip_ansi("step1\rstep2\rstep3"), "step3");
+        // 普通中文文本不受影响
+        assert_eq!(strip_ansi("服务器已启动"), "服务器已启动");
+    }
+
+    #[test]
+    fn extract_config_port_only_from_server_block() {
+        // proxy.target 端口不能覆盖 server.port
+        let cfg = "export default defineConfig({\n  server: { port: 5174 },\n  proxy: { '/api': { target: 'http://localhost:9999' } }\n})";
+        assert_eq!(extract_config_port(cfg), Some(5174));
+        // 注释里的伪端口被忽略
+        let cfg2 = "// 备用端口 port: 8080\nexport default { server: { port: 3001 } }";
+        assert_eq!(extract_config_port(cfg2), Some(3001));
+        // 无 server 块 → 不误取 proxy 的端口
+        assert_eq!(extract_config_port("proxy: { target: 'http://localhost:9999' }"), None);
+    }
+
+    #[test]
+    fn extract_url_port_only_from_devurl() {
+        // 插件配置里的 URL 不能覆盖 devUrl
+        let conf = r#"{"devUrl":"http://localhost:1425","plugins":{"http":{"url":"http://localhost:9999"}}}"#;
+        assert_eq!(extract_url_port(conf), Some(1425));
+        // devUrl 不存在时不误取其他 URL
+        assert_eq!(extract_url_port(r#"{"plugins":{"url":"http://localhost:9999"}}"#), None);
+    }
+
+    #[test]
+    fn collect_ports_ignores_non_run_script_ports() {
+        // build 脚本里的 --port 属误报,应只取 dev 的显式端口
+        let d = tmpdir("portfilter");
+        fs::write(
+            d.join("package.json"),
+            r#"{"scripts":{"dev":"vite --port 4001","build":"vite build --port 9999","test":"jest --port 7777"}}"#,
+        )
+        .unwrap();
+        let r = collect_ports(d.to_str().unwrap());
+        let ports: Vec<u16> = r.iter().map(|x| x.0).collect();
+        assert_eq!(ports, vec![4001]);
         fs::remove_dir_all(&d).ok();
     }
 
